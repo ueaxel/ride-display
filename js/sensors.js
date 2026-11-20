@@ -17,11 +17,24 @@ class BleLink {
     this.device.addEventListener('gattserverdisconnected', () => this.reconnect());
     await this.connect();
   }
-  async connect() {
+  // Android often fails the first GATT connection ("GATT operation failed for
+  // unknown reason"); a short pause and a fresh try usually works.
+  async connect(tries = 4) {
     this.status('connecting');
-    const server = await this.device.gatt.connect();
-    await this.setup(server);
-    this.status('connected');
+    let err;
+    for (let i = 0; i < tries; i++) {
+      try {
+        const server = await this.device.gatt.connect();
+        await this.setup(server);
+        this.status('connected');
+        return;
+      } catch (e) {
+        err = e;
+        try { this.device.gatt.disconnect(); } catch (e2) { /* */ }
+        await new Promise(r => setTimeout(r, 800 + 700 * i));
+      }
+    }
+    throw err;
   }
   async reconnect() {
     if (!this.wanted) return;
@@ -48,9 +61,10 @@ export function parseHeartRate(dv) {
   return { hr, rr };
 }
 
-export async function connectHeartRate(onData, onStatus) {
+export async function connectHeartRate(onData, onStatus, showAll = false) {
   const link = new BleLink('HR strap', onStatus);
-  await link.open({ filters: [{ services: ['heart_rate'] }] }, async server => {
+  await link.open(showAll ? { acceptAllDevices: true, optionalServices: ['heart_rate'] }
+    : { filters: [{ services: ['heart_rate'] }, { namePrefix: 'HRM' }], optionalServices: ['heart_rate'] }, async server => {
     const ch = await (await server.getPrimaryService('heart_rate')).getCharacteristic('heart_rate_measurement');
     ch.addEventListener('characteristicvaluechanged', e => onData(parseHeartRate(e.target.value)));
     await ch.startNotifications();
@@ -103,11 +117,15 @@ export function makeCyclingPowerParser() {
 }
 
 // Listens to the trainer only (no control): the watch keeps control over ANT+.
-export async function connectTrainer(onData, onStatus) {
+// Some trainers don't announce their services, so also match by name, or
+// (showAll) list every Bluetooth device nearby.
+export async function connectTrainer(onData, onStatus, showAll = false) {
   const link = new BleLink('Trainer', onStatus);
-  await link.open({
-    filters: [{ services: ['fitness_machine'] }, { services: ['cycling_power'] }],
-    optionalServices: ['fitness_machine', 'cycling_power'],
+  const optionalServices = ['fitness_machine', 'cycling_power'];
+  await link.open(showAll ? { acceptAllDevices: true, optionalServices } : {
+    filters: [{ services: ['fitness_machine'] }, { services: ['cycling_power'] },
+      ...['CYCPLUS', 'Cycplus', 'cycplus', 'R200', 'CP-', 'Smart'].map(namePrefix => ({ namePrefix }))],
+    optionalServices,
   }, async server => {
     try {
       const svc = await server.getPrimaryService('fitness_machine');

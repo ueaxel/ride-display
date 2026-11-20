@@ -234,15 +234,17 @@ function resync() {
   render();
 }
 
-async function bt(key, connect, btn, onData) {
+async function bt(key, connect, btn, onData, showAll = false) {
   if (!bluetoothAvailable()) { banner('Bluetooth needs Chrome and an https:// address (Android, Mac or Windows; not iPhone).'); return; }
   if (links[key]) { links[key].close(); links[key] = null; btn.dataset.state = 'off'; return; }
   try {
-    links[key] = await connect(onData, s => { btn.dataset.state = s; });
+    banner('');
+    links[key] = await connect(onData, s => { btn.dataset.state = s; }, showAll);
     btn.title = links[key].name + (links[key].protocol ? ` (${links[key].protocol})` : '');
   } catch (e) {
     btn.dataset.state = 'off';
-    if (e.name !== 'NotFoundError') banner(`${btn.textContent}: ${e.message}`);
+    links[key] = null;
+    if (e.name !== 'NotFoundError') banner(`${btn.textContent}: ${e.message} — make sure no other device (watch, phone, trainer app) is using it over Bluetooth, then tap again.`);
   }
 }
 
@@ -361,14 +363,18 @@ async function getStreets() {
 
 // ------------------------------------------------------------------ wiring
 
-$('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), d => { live.hr = d.hr; live.tHr = Date.now(); });
-$('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), d => {
+const onHrData = d => { live.hr = d.hr; live.tHr = Date.now(); };
+const onTrainerData = d => {
   if (d.power != null) live.power = d.power;
   if (d.cadence != null) live.cadence = d.cadence;
   live.speed = d.speed ?? null; live.tPower = Date.now();
   if (d.hr && Date.now() - live.tHr > 5000) { live.hr = d.hr; live.tHr = Date.now(); }
-});
+};
+$('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
+$('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
+$('mAllTrainer').onclick = () => { $('dlgMenu').close(); if (links.trainer) { links.trainer.close(); links.trainer = null; } bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData, true); };
+$('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.close(); links.hr = null; } bt('hr', connectHeartRate, $('btnHr'), onHrData, true); };
 $('btnStart').onclick = $('gStart').onclick = toggleStart;
 $('btnResync').onclick = $('gResync').onclick = resync;
 $('btnCsv').onclick = $('mCsv').onclick = saveCsv;
