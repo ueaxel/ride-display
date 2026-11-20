@@ -9,8 +9,10 @@ check('FTMS speed+cadence+power', parseIndoorBikeData(dv([0x44, 0x00, 0xA0, 0x0F
 // FTMS with avg speed, distance, resistance, power, HR
 check('FTMS with skipped fields', parseIndoorBikeData(dv([0x76, 0x02, 0xE8, 0x03, 0x00, 0x00, 0xB4, 0x00, 0x10, 0x27, 0x00, 0x05, 0x00, 0x2C, 0x01, 0x8C])),
   { speed: 10, cadence: 90, power: 300, hr: 140 });
-check('HR uint8', parseHeartRate(dv([0x00, 72])), { hr: 72, rr: [] });
-check('HR uint16 + RR', parseHeartRate(dv([0x11, 0x2C, 0x01, 0x00, 0x04])), { hr: 300, rr: [1] });
+check('HR uint8', parseHeartRate(dv([0x00, 72])), { hr: 72, rr: [], contact: null });
+check('HR uint16 + RR', parseHeartRate(dv([0x11, 0x2C, 0x01, 0x00, 0x04])), { hr: 300, rr: [1], contact: null });
+check('HR no skin contact', parseHeartRate(dv([0x04, 60])).contact, false);
+check('HR skin contact', parseHeartRate(dv([0x06, 61])).contact, true);
 const cp = makeCyclingPowerParser();
 cp(dv([0x20, 0x00, 0xFA, 0x00, 0x0A, 0x00, 0x00, 0x04]));
 check('Cycling power + cadence', cp(dv([0x20, 0x00, 0xFA, 0x00, 0x0B, 0x00, 0xAB, 0x06])), { power: 250, cadence: 60 / ((0x06AB - 0x0400) / 1024) });

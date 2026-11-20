@@ -158,7 +158,7 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   const p3 = avgLast(S.power, 3);
   const fresh = Date.now() - live.tPower < 3000;
   $('tPower').textContent = running && p3 != null ? Math.round(p3) : fresh ? Math.round(live.power ?? 0) : '–';
-  $('tHr').textContent = hr ?? '–';
+  $('tHr').textContent = hr ?? (links.hr && live.contact === false ? 'no contact' : '–');
   $('tCad').textContent = fresh && live.cadence != null ? Math.round(live.cadence) : '–';
   $('tSpeed').textContent = S.speed.length ? (last(S.speed) * 3.6).toFixed(1) : '–';
   $('tTime').textContent = fmtTime(t);
@@ -204,7 +204,7 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
     $('gGapS').textContent = !ref ? 'load a reference ride' : running ? 'waiting for you to move' : 'press Start at the start of the route';
   }
   D.drawGapGauge($('gauge'), ref ? gapM : null);
-  $('gHr').textContent = hr ?? '–';
+  $('gHr').textContent = hr ?? (links.hr && live.contact === false ? 'no contact' : '–');
   const rh = last(S.refHr);
   $('gHrRef').textContent = rh ? `ghost ${Math.round(rh)}` + (hr ? ` (${sign(hr - rh)})` : '') : '';
   const sp = last(S.speed);
@@ -236,11 +236,12 @@ function resync() {
 
 async function bt(key, connect, btn, onData, showAll = false) {
   if (!bluetoothAvailable()) { banner('Bluetooth needs Chrome and an https:// address (Android, Mac or Windows; not iPhone).'); return; }
-  if (links[key]) { links[key].close(); links[key] = null; btn.dataset.state = 'off'; return; }
+  if (links[key]) { links[key].close(); links[key] = null; btn.dataset.state = 'off'; btn.textContent = btn.dataset.label; return; }
   try {
     banner('');
     links[key] = await connect(onData, s => { btn.dataset.state = s; }, showAll);
     btn.title = links[key].name + (links[key].protocol ? ` (${links[key].protocol})` : '');
+    btn.textContent = links[key].name;
   } catch (e) {
     btn.dataset.state = 'off';
     links[key] = null;
@@ -363,7 +364,11 @@ async function getStreets() {
 
 // ------------------------------------------------------------------ wiring
 
-const onHrData = d => { live.hr = d.hr; live.tHr = Date.now(); };
+const onHrData = d => {
+  live.contact = d.contact;
+  if (d.contact === false) { live.hr = null; return; }      // strap off: no reading, not a stale one
+  live.hr = d.hr; live.tHr = Date.now();
+};
 const onTrainerData = d => {
   if (d.power != null) live.power = d.power;
   if (d.cadence != null) live.cadence = d.cadence;
@@ -407,6 +412,7 @@ window.addEventListener('hashchange', () => { if (location.hash === '#ghost' || 
 
 // ------------------------------------------------------------------ start
 
+for (const id of ['btnHr', 'btnTrainer']) $(id).dataset.label = $(id).textContent;
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
 newRide();

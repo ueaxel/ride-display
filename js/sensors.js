@@ -58,7 +58,9 @@ export function parseHeartRate(dv) {
   if (flags & 0x08) p += 2;                      // energy expended
   const rr = [];
   if (flags & 0x10) for (; p + 1 < dv.byteLength; p += 2) rr.push(dv.getUint16(p, true) / 1024);
-  return { hr, rr };
+  // bit 2 = strap reports skin contact, bit 1 = contact detected
+  const contact = flags & 0x04 ? !!(flags & 0x02) : null;
+  return { hr, rr, contact };
 }
 
 export async function connectHeartRate(onData, onStatus, showAll = false) {
