@@ -62,8 +62,8 @@ export function guessV0(prof, info) {
 // ------------------------------------------------------------ clip objects
 
 export class Clip {
-  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false }) {
-    Object.assign(this, { id, name, fitName, v0, duration, created, synced });
+  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false }) {
+    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock });
     this.prof = prof;
     this.ref = new Reference(prof);
     this.file = null;          // the video File (picked each session)
@@ -78,13 +78,18 @@ export class Clip {
     const a = this.distAtVideo(0), b = this.duration ? this.distAtVideo(this.duration) : this.ref.total;
     return [a, b];
   }
+  // Direction of travel (radians clockwise from north) at a distance.
+  heading(dist) {
+    const [ax, ay] = this.ref.xy(Math.max(0, dist - 20)), [bx, by] = this.ref.xy(Math.min(this.ref.total, dist + 20));
+    return Math.atan2(bx - ax, by - ay);
+  }
   setFile(file) {
     if (this.url) URL.revokeObjectURL(this.url);
     this.file = file; this.url = URL.createObjectURL(file);
   }
   toJSON() {
-    const { id, name, fitName, v0, duration, created, synced, prof } = this;
-    return { id, name, fitName, v0, duration, created, synced, prof };
+    const { id, name, fitName, v0, duration, created, synced, worldLock, prof } = this;
+    return { id, name, fitName, v0, duration, created, synced, worldLock, prof };
   }
 }
 

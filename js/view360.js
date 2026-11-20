@@ -29,6 +29,7 @@ export class VideoView {
     this.canvas.className = 'sphere';
     container.append(this.video, this.canvas);
     this.yaw = 0; this.pitch = -0.08; this.fov = 80;
+    this.extraYaw = 0;                       // added turn (world-locked videos follow the road)
     this.is360 = false;
     this.gl = null;
     this.ready = false;
@@ -94,7 +95,7 @@ export class VideoView {
     gl.viewport(0, 0, w, h);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     if (this.dirty || this.noVfc) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.video); this.dirty = false; }
-    gl.uniform1f(this.u.yaw, this.yaw); gl.uniform1f(this.u.pitch, this.pitch);
+    gl.uniform1f(this.u.yaw, this.yaw + this.extraYaw); gl.uniform1f(this.u.pitch, this.pitch);
     gl.uniform1f(this.u.tanHalf, Math.tan(this.fov * Math.PI / 360)); gl.uniform1f(this.u.aspect, w / h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

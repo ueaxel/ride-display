@@ -45,6 +45,7 @@ When you load a reference, the page also downloads the streets within about 200 
 
 **5. Ride.** In Clips, tap **Ride this** (it starts where the video starts), connect HR and trainer, choose a Resistance mode and press **Start**. The video plays at the pace that matches your position on the route. It slows down where the original rider was slower than you, pauses when you stop, and jumps over the original's red-light waits.
 - **360°:** drag the video to look around and scroll to zoom. **Look ahead** turns the view forward again.
+- **World Lock:** export with GoPro Player's *World Lock* **off**. World Lock keeps the picture facing the direction the camera had at the start, so on a bike ride the view drifts away from the road. *Horizon Leveling* can stay on. For a video already exported with World Lock on, press **Turn with road**. The app then turns the view by how much the route has turned since the start of the video. This is saved per clip.
 - **Panels:** drag them by the title and resize them at the bottom-right corner; × hides one, and **Panels** turns them on or off or resets the layout. They stay where you put them on the screen, whatever the video does.
 - After 4 s of riding, the top bar and the panel handles hide; move the mouse to bring them back. ☰ → **Full screen** fills the whole display.
 

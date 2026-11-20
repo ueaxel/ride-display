@@ -71,6 +71,16 @@ export function initVideoScreen(api) {
   $('btnPanels').onclick = () => { fillPanelMenu(); $('dlgPanels').showModal(); };
   $('vPanelsClose').onclick = () => $('dlgPanels').close();
   $('btnLook').onclick = () => view.resetView();
+  $('btnTurn').onclick = async () => {
+    const c = clips[cur];
+    if (!c) return;
+    c.worldLock = !c.worldLock; await saveClip(c); updateTurnBtn();
+  };
+  function updateTurnBtn() {
+    const c = clips[cur], b = $('btnTurn');
+    b.textContent = c && c.worldLock ? '✓ Turn with road' : 'Turn with road';
+    b.title = 'For videos exported with World Lock on: turn the view with the road';
+  }
   $('mapWhole').onclick = e => { mapWhole = !mapWhole; e.target.textContent = mapWhole ? 'Follow' : 'Whole route'; draw(); };
 
   // header auto-hide while riding: move the mouse or touch to bring it back
@@ -141,7 +151,7 @@ export function initVideoScreen(api) {
   };
 
   function startClip(i, p) {
-    cur = i;
+    cur = i; setTimeout(updateTurnBtn);
     const c = clips[i];
     view.load(c.url);
     api.switchRef(c.ref, p, 'clip:' + c.id);
@@ -175,7 +185,7 @@ export function initVideoScreen(api) {
   function takeTurn(ch) {
     const p = net.transfer(cur, api.pos, ch.clip);
     if (p == null) return;
-    cur = ch.clip;
+    cur = ch.clip; setTimeout(updateTurnBtn);
     const c = clips[cur];
     view.load(c.url);
     api.switchRef(c.ref, p, 'clip:' + c.id);
@@ -261,6 +271,13 @@ export function initVideoScreen(api) {
     const dvd = (c.videoTime(p + 5) - c.videoTime(p - 5)) / 10;
     const flow = api.running && api.live.moving ? Math.max(0, Math.min(4, dvd * (api.live.speedNow || 0))) : 0;
     follower.update(target, flow);
+    // video exported with World Lock: its picture keeps the direction the camera
+    // had when recording started, so turn the view by how much the road has turned since
+    if (c.worldLock && view.is360 && c.ref.hasRoute) {
+      const want = c.heading(p) - c.heading(Math.max(0, c.distAtVideo(0)));
+      let diff = Math.atan2(Math.sin(want - view.extraYaw), Math.cos(want - view.extraYaw));
+      view.extraYaw += diff * 0.15;                       // smooth
+    } else view.extraYaw = 0;
     const msg = follower.state === 'before' ? 'The video starts a little further on' : follower.state === 'after' ? 'End of this video' : '';
     if ($('vMsg').dataset.state !== follower.state) { $('vMsg').textContent = msg; $('vMsg').dataset.state = follower.state; }
   };
