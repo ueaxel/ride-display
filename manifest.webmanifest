@@ -1,0 +1,9 @@
+{
+  "name": "Ride Display",
+  "short_name": "Ride Display",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#0B0F14",
+  "theme_color": "#0B0F14",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

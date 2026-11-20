@@ -1,0 +1,355 @@
+// The original ("reference") ride, read straight from its .fit file in the
+// browser. Same method as tools/make_reference.py and tools/estimate_power.py,
+// so the displays see the same profile as the Ride Repro watch field:
+// moving time, speed, heart rate, power, route and grade every few metres.
+
+const G = 9.81;
+const DRIVETRAIN = 0.97;
+const M_PER_DEG_LAT = 110540.0;
+const M_PER_DEG_LON = 111320.0;
+const GRADE_WINDOW = 25.0;   // metres either side for grade / smoothed altitude
+const SMOOTH = 2;            // route smoothing, +/- points
+
+// Rider set-up (matches tools/estimate_power.py and IndoorRide.mc defaults).
+export const RIDER = { riderKg: 76.5, extraKg: 1.0, bikeKg: 10.5, cda: 0.32, crr: 0.0055 };
+
+// ---------------------------------------------------------------- FIT reader
+
+// base type -> [DataView getter, size, invalid value]
+const BASE = {
+  0x00: ['getUint8', 1, 0xFF], 0x01: ['getInt8', 1, 0x7F], 0x02: ['getUint8', 1, 0xFF],
+  0x83: ['getInt16', 2, 0x7FFF], 0x84: ['getUint16', 2, 0xFFFF],
+  0x85: ['getInt32', 4, 0x7FFFFFFF], 0x86: ['getUint32', 4, 0xFFFFFFFF],
+  0x88: ['getFloat32', 4, null], 0x89: ['getFloat64', 8, null],
+  0x8B: ['getUint16', 2, 0], 0x8C: ['getUint32', 4, 0], 0x0A: ['getUint8', 1, 0],
+};
+
+// Yields [global message number, {field number: value}] for each data message.
+export function* readFit(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const headerSize = bytes[0];
+  const sig = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+  if (sig !== '.FIT') throw new Error('This is not a .fit file.');
+  const end = Math.min(bytes.length, headerSize + view.getUint32(4, true));
+  const defs = {};
+  let pos = headerSize, lastTs = null;
+  while (pos < end) {
+    const rec = bytes[pos++];
+    if (rec & 0x80) {                       // compressed timestamp header
+      const d = defs[(rec >> 5) & 0x3];
+      if (!d) throw new Error('Damaged .fit file.');
+      const values = parseData(view, pos, d);
+      pos += d.size;
+      if (lastTs !== null) {
+        let ts = (lastTs & ~0x1F) + (rec & 0x1F);
+        if (ts < lastTs) ts += 0x20;
+        lastTs = ts;
+        values[253] = ts;
+      }
+      yield [d.glob, values];
+      continue;
+    }
+    const local = rec & 0x0F;
+    if (rec & 0x40) {                       // definition message
+      const little = bytes[pos + 1] === 0;
+      const glob = view.getUint16(pos + 2, little);
+      const n = bytes[pos + 4];
+      pos += 5;
+      const fields = [];
+      for (let i = 0; i < n; i++, pos += 3) fields.push([bytes[pos], bytes[pos + 1], bytes[pos + 2]]);
+      let devSize = 0;
+      if (rec & 0x20) {
+        const nd = bytes[pos++];
+        for (let i = 0; i < nd; i++, pos += 3) devSize += bytes[pos + 1];
+      }
+      defs[local] = { glob, little, fields, size: fields.reduce((s, f) => s + f[1], 0) + devSize };
+    } else {
+      const d = defs[local];
+      if (!d) throw new Error('Damaged .fit file.');
+      const values = parseData(view, pos, d);
+      pos += d.size;
+      if (253 in values) lastTs = values[253];
+      yield [d.glob, values];
+    }
+  }
+}
+
+function parseData(view, pos, d) {
+  const values = {};
+  let p = pos;
+  for (const [num, size, base] of d.fields) {
+    const spec = BASE[base];
+    if (spec && spec[1] === size) {
+      const v = view[spec[0]](p, d.little);
+      if ((spec[2] === null || v !== spec[2]) && !Number.isNaN(v)) values[num] = v;
+    }
+    p += size;
+  }
+  return values;
+}
+
+// ---------------------------------------------------------------- ride
+
+// Records (with moving time), timer events and the rider weight from a ride.
+export function loadRide(buffer) {
+  const events = [], records = [];
+  let riderKg = null;
+  for (const [msg, v] of readFit(buffer)) {
+    if (msg === 21 && v[0] === 0 && 253 in v) events.push([v[253], v[1]]);
+    else if (msg === 3 && 4 in v) riderKg = v[4] / 10;
+    else if (msg === 20 && 253 in v && 5 in v) {
+      const speed = 73 in v ? v[73] : v[6];
+      const alt = 78 in v ? v[78] : v[2];
+      records.push({
+        ts: v[253], dist: v[5] / 100,
+        speed: speed === undefined ? null : speed / 1000,
+        hr: v[3] ?? null, power: v[7] ?? null, cadence: v[4] ?? null,
+        lat: 0 in v ? v[0] * 180 / 2 ** 31 : null,
+        lon: 1 in v ? v[1] * 180 / 2 ** 31 : null,
+        alt: alt === undefined ? null : alt / 5 - 500,
+      });
+    }
+  }
+  if (records.length < 2) throw new Error('The ride has too few distance records.');
+  // Moving time = elapsed time minus timer pauses (auto-pause included).
+  events.sort((a, b) => a[0] - b[0]);
+  const pausedBefore = [];
+  let stoppedAt = null, totalPause = 0;
+  for (const [ts, kind] of events) {
+    if ((kind === 1 || kind === 4) && stoppedAt === null) stoppedAt = ts;
+    else if (kind === 0 && stoppedAt !== null) {
+      totalPause += ts - stoppedAt;
+      stoppedAt = null;
+      pausedBefore.push([ts, totalPause]);
+    }
+  }
+  const t0 = records[0].ts;
+  let k = 0, pause = 0;
+  for (const r of records) {
+    while (k < pausedBefore.length && r.ts >= pausedBefore[k][0]) pause = pausedBefore[k++][1];
+    r.moving = r.ts - t0 - pause;
+  }
+  return { records, events, riderKg };
+}
+
+// ---------------------------------------------------------------- helpers
+
+// Linear interpolation of ys at x on increasing xs (clamped at the ends).
+export function interp(xs, ys, x) {
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] <= x) lo = m; else hi = m; }
+  const span = xs[hi] - xs[lo];
+  return span > 0 ? ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / span : ys[hi];
+}
+
+function gaussianSmooth(xs, ys, sigma) {
+  const out = new Array(xs.length);
+  let lo = 0;
+  for (let i = 0; i < xs.length; i++) {
+    while (xs[i] - xs[lo] > 3 * sigma) lo++;
+    let wsum = 0, vsum = 0;
+    for (let j = lo; j < xs.length && xs[j] - xs[i] <= 3 * sigma; j++) {
+      const w = Math.exp(-0.5 * ((xs[j] - xs[i]) / sigma) ** 2);
+      wsum += w; vsum += w * ys[j];
+    }
+    out[i] = vsum / wsum;
+  }
+  return out;
+}
+
+function fillGaps(records, key) {
+  const first = records.find(r => r[key] !== null);
+  if (!first) return false;
+  let last = first[key];
+  for (const r of records) { if (r[key] === null) r[key] = last; else last = r[key]; }
+  return true;
+}
+
+// ---------------------------------------------------------------- power
+
+// Power for a ride without a power meter (tools/estimate_power.py).
+export function estimatePower(records, events, rider = RIDER) {
+  const mass = rider.riderKg + rider.extraKg + rider.bikeKg;
+  const mEff = mass + 1;
+  if (!fillGaps(records, 'alt')) records.forEach(r => { r.alt = 0; });
+  const pts = records.map(r => [r.dist, r.alt]).sort((a, b) => a[0] - b[0]);
+  const dx = pts.map(p => p[0]), da = pts.map(p => p[1]);
+  const grid = [];
+  for (let g = 0; g <= dx[dx.length - 1]; g += 5) grid.push(g);
+  const alts = gaussianSmooth(grid, grid.map(g => interp(dx, da, g)), 20);
+  const last = grid.length - 1;
+  const slope = grid.map((_, i) => {
+    const a = Math.max(i - 1, 0), b = Math.min(i + 1, last);
+    return b > a ? (alts[b] - alts[a]) / (grid[b] - grid[a]) : 0;
+  });
+  const stops = events.filter(e => e[1] === 1 || e[1] === 4).map(e => e[0]).sort((a, b) => a - b);
+  const segs = [];
+  let cur = [];
+  for (const r of records) {
+    if (cur.length) {
+      const prev = cur[cur.length - 1].ts;
+      if (stops.some(s => prev <= s && s < r.ts) || r.ts - prev > 30) { segs.push(cur); cur = []; }
+    }
+    cur.push(r);
+  }
+  if (cur.length) segs.push(cur);
+  for (const seg of segs) {
+    if (seg.length < 3) { seg.forEach(r => { r.power = 0; }); continue; }
+    const t0 = seg[0].ts;
+    const ts = seg.map(r => r.ts - t0);
+    const sec = [];
+    for (let s = 0; s <= Math.floor(ts[ts.length - 1]); s++) sec.push(s);
+    const n = sec.length;
+    const dist = gaussianSmooth(sec, sec.map(s => interp(ts, seg.map(r => r.dist), s)), 3);
+    const diff = arr => sec.map((_, i) => {
+      const a = Math.max(i - 1, 0), b = Math.min(i + 1, n - 1);
+      return (arr[b] - arr[a]) / Math.max(1, b - a);
+    });
+    const v = diff(dist).map(x => Math.max(0, x));
+    const acc = gaussianSmooth(sec, diff(v), 3);
+    seg.forEach((r, j) => {
+      const i = Math.min(Math.round(ts[j]), n - 1);
+      const speed = v[i], a = acc[i];
+      const angle = Math.atan(interp(grid, slope, r.dist));
+      const rho = 1.225 * Math.exp(-(r.alt || 0) / 8434);
+      let p = (mass * G * speed * (Math.sin(angle) + rider.crr * Math.cos(angle))
+        + mEff * a * speed + 0.5 * rho * rider.cda * speed ** 3) / DRIVETRAIN;
+      if (r.cadence === 0 || speed < 0.5) p = 0;
+      r.power = Math.round(Math.min(Math.max(p, 0), 1500));
+    });
+  }
+  return mass;
+}
+
+// ---------------------------------------------------------------- profile
+
+function gradeClass(g) {
+  for (const [limit, cls] of [[-5, -2], [-2, -1], [2, 0], [5, 1], [8, 2]]) if (g < limit) return cls;
+  return 3;
+}
+
+// Profile every `step` metres (tools/make_reference.py build_profile).
+export function buildProfile(records, step = 5) {
+  const total = records[records.length - 1].dist;
+  const d = [];
+  for (let i = 0; i * step <= total; i++) d.push(Math.round(i * step * 10) / 10);
+  if (d[d.length - 1] < total) d.push(Math.round(total * 10) / 10);
+  const rd = records.map(r => r.dist);
+  const at = key => {
+    const ys = records.map(r => r[key]);
+    return x => interp(rd, ys, x);
+  };
+  const prof = { step, d };
+  const moving = at('moving');
+  prof.t = d.map(x => moving(x));
+  if (fillGaps(records, 'speed')) { const f = at('speed'); prof.v = d.map(x => f(x) * 3.6); }
+  else prof.v = d.map(() => 0);
+  if (fillGaps(records, 'hr')) { const f = at('hr'); prof.hr = d.map(x => f(x)); }
+  else prof.hr = d.map(() => 0);
+  if (fillGaps(records, 'power')) { const f = at('power'); prof.p = d.map(x => f(x)); }
+  if (fillGaps(records, 'lat') && fillGaps(records, 'lon')) {
+    const lat0 = records[0].lat, lon0 = records[0].lon;
+    const coslat = Math.cos(lat0 * Math.PI / 180);
+    const flat = at('lat'), flon = at('lon');
+    const xs = d.map(x => (flon(x) - lon0) * coslat * M_PER_DEG_LON);
+    const ys = d.map(x => (flat(x) - lat0) * M_PER_DEG_LAT);
+    const sm = arr => arr.map((_, i) => {
+      const a = Math.max(0, i - SMOOTH), b = Math.min(arr.length, i + SMOOTH + 1);
+      let s = 0; for (let j = a; j < b; j++) s += arr[j]; return s / (b - a);
+    });
+    Object.assign(prof, { lat0, lon0, x: sm(xs), y: sm(ys) });
+  }
+  if (fillGaps(records, 'alt')) {
+    const falt = at('alt');
+    prof.g = d.map(x => {
+      const a = Math.max(0, x - GRADE_WINDOW), b = Math.min(total, x + GRADE_WINDOW);
+      return b > a ? gradeClass(100 * (falt(b) - falt(a)) / (b - a)) : 0;
+    });
+    const w = Math.max(1, Math.round(GRADE_WINDOW / step));
+    const alts = d.map(falt);
+    prof.a = alts.map((_, i) => {
+      const a = Math.max(0, i - w), b = Math.min(alts.length, i + w + 1);
+      let s = 0; for (let j = a; j < b; j++) s += alts[j]; return s / (b - a);
+    });
+  }
+  return prof;
+}
+
+// Read a ride file and return its profile. untilKm cuts the ride short.
+export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '' } = {}) {
+  let { records, events, riderKg } = loadRide(buffer);
+  if (untilKm) records = records.filter(r => r.dist <= untilKm * 1000);
+  if (records.length < 2) throw new Error('Nothing left before that distance.');
+  let estimated = false;
+  if (!records.some(r => r.power !== null) && records.some(r => r.alt !== null)) {
+    estimatePower(records, events, { ...rider, riderKg: rider.riderKg || riderKg || 76.5 });
+    estimated = true;
+  }
+  const prof = buildProfile(records, 5);
+  prof.name = name;
+  prof.powerEstimated = estimated;
+  return prof;
+}
+
+// ---------------------------------------------------------------- lookups
+
+export class Reference {
+  constructor(prof) {
+    this.prof = prof;
+    this.d = prof.d;
+    this.n = prof.d.length;
+    this.total = prof.d[this.n - 1];
+    this.totalTime = prof.t[this.n - 1];
+    this.name = prof.name || 'Reference ride';
+  }
+  get hasRoute() { return !!this.prof.x; }
+  get hasPower() { return !!this.prof.p; }
+  get hasAlt() { return !!this.prof.a; }
+  at(key, dist) { const ys = this.prof[key]; return ys ? interp(this.d, ys, dist) : 0; }
+  timeAt(dist) { return this.at('t', dist); }
+  // Distance the original ride had covered after `t` seconds of moving time.
+  distAtTime(t) { return interp(this.prof.t, this.d, t); }
+  gradeFraction(dist) {
+    if (!this.hasAlt) return 0;
+    const a = Math.max(0, dist - GRADE_WINDOW), b = Math.min(this.total, dist + GRADE_WINDOW);
+    return b > a ? (this.at('a', b) - this.at('a', a)) / (b - a) : 0;
+  }
+  index(dist) { return Math.max(0, Math.min(this.n - 1, Math.floor(dist / this.prof.step))); }
+  xy(dist) { return [this.at('x', dist), this.at('y', dist)]; }
+  toJSON() { return this.prof; }
+}
+
+// Grade class colours, as on the watch (RouteMap.mc).
+export function gradeColor(cls) {
+  return cls <= -2 ? '#2F6FE0' : cls === -1 ? '#7CC4F5' : cls === 0 ? '#8A94A3'
+    : cls === 1 ? '#FFD866' : cls === 2 ? '#FF9F43' : '#E8524A';
+}
+
+// ---------------------------------------------------------------- indoor physics
+
+// Moves you along the route from your power (RideRepro/source/IndoorRide.mc):
+// pedal the original power and you ride the original speed.
+export class IndoorRide {
+  constructor(rider = RIDER) {
+    this.mass = rider.riderKg + rider.extraKg + rider.bikeKg;
+    this.massEff = this.mass + 1;
+    this.cda = rider.cda; this.crr = rider.crr;
+    this.dist = 0; this.speed = 0;
+  }
+  step(watts, dt, grade) {
+    if (dt <= 0) return;
+    dt = Math.min(dt, 5);
+    const angle = Math.atan(grade), sinA = Math.sin(angle), cosA = Math.cos(angle);
+    const n = Math.max(1, Math.floor(dt / 0.25)), h = dt / n;
+    for (let i = 0; i < n; i++) {
+      const resist = this.mass * G * (sinA + this.crr * cosA) + 0.5 * 1.2 * this.cda * this.speed ** 2;
+      const push = watts * DRIVETRAIN / Math.max(this.speed, 1);
+      this.speed = Math.max(0, this.speed + (push - resist) / this.massEff * h);
+      this.dist += this.speed * h;
+    }
+  }
+}
