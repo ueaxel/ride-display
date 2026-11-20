@@ -94,9 +94,10 @@ function parseData(view, pos, d) {
 // Records (with moving time), timer events and the rider weight from a ride.
 export function loadRide(buffer) {
   const events = [], records = [];
-  let riderKg = null;
+  let riderKg = null, tz = null;
   for (const [msg, v] of readFit(buffer)) {
     if (msg === 21 && v[0] === 0 && 253 in v) events.push([v[253], v[1]]);
+    else if (msg === 34 && 253 in v && 5 in v) tz = v[5] - v[253];        // activity: local - UTC
     else if (msg === 3 && 4 in v) riderKg = v[4] / 10;
     else if (msg === 20 && 253 in v && 5 in v) {
       const speed = 73 in v ? v[73] : v[6];
@@ -129,8 +130,9 @@ export function loadRide(buffer) {
   for (const r of records) {
     while (k < pausedBefore.length && r.ts >= pausedBefore[k][0]) pause = pausedBefore[k++][1];
     r.moving = r.ts - t0 - pause;
+    r.elapsed = r.ts - t0;                       // clock time since the start (video sync)
   }
-  return { records, events, riderKg };
+  return { records, events, riderKg, tz };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -246,6 +248,7 @@ export function buildProfile(records, step = 5) {
   const prof = { step, d };
   const moving = at('moving');
   prof.t = d.map(x => moving(x));
+  if (records[0].elapsed !== undefined) { const el = at('elapsed'); prof.e = d.map(x => el(x)); }
   if (fillGaps(records, 'speed')) { const f = at('speed'); prof.v = d.map(x => f(x) * 3.6); }
   else prof.v = d.map(() => 0);
   if (fillGaps(records, 'hr')) { const f = at('hr'); prof.hr = d.map(x => f(x)); }
@@ -281,7 +284,7 @@ export function buildProfile(records, step = 5) {
 
 // Read a ride file and return its profile. untilKm cuts the ride short.
 export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '' } = {}) {
-  let { records, events, riderKg } = loadRide(buffer);
+  let { records, events, riderKg, tz } = loadRide(buffer);
   if (untilKm) records = records.filter(r => r.dist <= untilKm * 1000);
   if (records.length < 2) throw new Error('Nothing left before that distance.');
   let estimated = false;
@@ -292,6 +295,10 @@ export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '
   const prof = buildProfile(records, 5);
   prof.name = name;
   prof.powerEstimated = estimated;
+  prof.start = records[0].ts + 631065600;        // Unix seconds of the first record
+  prof.duration = records[records.length - 1].ts - records[0].ts;
+  prof.tz = tz;                                   // seconds east of UTC, if the file says
+  if (records[0].lat !== null && records[0].lat !== undefined) { prof.lat1 = records[0].lat; prof.lon1 = records[0].lon; }
   return prof;
 }
 
@@ -313,6 +320,9 @@ export class Reference {
   timeAt(dist) { return this.at('t', dist); }
   // Distance the original ride had covered after `t` seconds of moving time.
   distAtTime(t) { return interp(this.prof.t, this.d, t); }
+  // Clock seconds since the ride's start when the original rider passed `dist` (video sync).
+  elapsedAt(dist) { return this.prof.e ? interp(this.d, this.prof.e, dist) : this.timeAt(dist); }
+  distAtElapsed(e) { return interp(this.prof.e || this.prof.t, this.d, e); }
   gradeFraction(dist) {
     if (!this.hasAlt) return 0;
     const a = Math.max(0, dist - GRADE_WINDOW), b = Math.min(this.total, dist + GRADE_WINDOW);

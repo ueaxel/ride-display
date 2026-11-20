@@ -68,6 +68,7 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
     toScreen = (x, y) => { const dx = x - cx, dy = y - cy; return [sx + s * (dx * c - dy * sn), sy - s * (dx * sn + dy * c)]; };
     scale = s; cull = { cx, cy, r: Math.hypot(ctx.w, ctx.h) / s };
   }
+  canvas._toScreen = toScreen;                 // for clicks on the map (video sync)
   if (streets) {
     drawStreets(ctx, streets, toScreen, scale, cull);
     ctx.fillStyle = '#6B7685'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';

@@ -7,6 +7,8 @@ One web page with two screens. It runs in Chrome; nothing to install.
 | **Trainer** (`#trainer`) | TCL tablet beside the trainer | R200 over Bluetooth (FTMS, or Cycling Power), HRM 200 strap | power, HR, cadence, route map with you and the ghost, elevation, HR vs power, power/HR over time, HR response to power steps |
 | **Handlebar** (`#ghost`) | Pixel 3a on the bars | phone GPS, HRM 200 strap | gap to the ghost in metres and seconds, gauge, heading-up map, HR and speed against the original |
 
+| **Video** (`#video`) | Mac (Chrome), or the tablet with flat videos | same as Trainer | your ride video full screen, following your position; numbers, map, HR vs power and traces floating on top |
+
 The watch is not involved and the iPhone doesn't need to be connected. The watch keeps recording, and indoors it keeps controlling the R200 over **ANT+**. Each display listens to the same sensors over **Bluetooth**. If a sensor won't connect to the display, check that the watch is using it over ANT+ and not Bluetooth.
 
 ## Reference ride
@@ -31,6 +33,23 @@ When you load a reference, the page also downloads the streets within about 200 
 - **Save CSV** (or ☰ → Save CSV) saves every second of the ride, plus the fitted power steps.
 - ☰ → **Demo data** fills the screen with simulated data so you can try it without sensors.
 
+## Video screen (Mac)
+
+**1. Prepare the videos (once per ride).** GoPro MAX `.360` files can't play in a browser. In **GoPro Player** on the Mac, export each as a **360° (equirectangular) MP4**. 4K H.264 is the safe choice; 5.6K or HEVC also play in Chrome on recent Macs. A normal flat video (or a reframed 16:9 export) works too and is lighter for the tablet.
+
+**2. Put each video and the watch's .fit of the same ride in one folder.** You can also use the .zip from Garmin Connect *Export Original*. One ride can have several videos (GoPro splits long recordings), and every video becomes its own clip.
+
+**3. Open it.** In Chrome: ☰ → **Video screen**, then **Clips** → **Choose video folder…**. Next time, use **Open last folder**. The app pairs each video with the ride that was being recorded when the video started. Camera clocks often save local time as if it were UTC, so the app also tries the ride's time zone. If no time matches, it pairs a video with a ride of the same file name. Streets are downloaded for each clip once (online).
+
+**4. Sync each clip once.** In Clips, tap **Sync**. Scrub the video (−10/−1/+1/+10 s, slider) to a spot you can recognise, such as a crossing, a bridge or a turn, then click that spot on the map. The offset is saved. Check a second spot to confirm. Until you've done this, the clip shows *sync not checked* and relies on the clocks.
+
+**5. Ride.** In Clips, tap **Ride this** (it starts where the video starts), connect HR and trainer, choose a Resistance mode and press **Start**. The video plays at the pace that matches your position on the route. It slows down where the original rider was slower than you, pauses when you stop, and jumps over the original's red-light waits.
+- **360°:** drag the video to look around and scroll to zoom. **Look ahead** turns the view forward again.
+- **Panels:** drag them by the title and resize them at the bottom-right corner; × hides one, and **Panels** turns them on or off or resets the layout. They stay where you put them on the screen, whatever the video does.
+- After 4 s of riding, the top bar and the panel handles hide; move the mouse to bring them back. ☰ → **Full screen** fills the whole display.
+
+**Junctions.** Where another clip runs along the same road as the one you're riding, the app looks ahead for where the two routes split. About 350 m before the split, it offers the choice: **1** stays on your clip, **2**, **3**… take the other clip (keys or click). Taking it switches to the other video at the same spot on the road, so the picture doesn't jump. At the end of a clip, if another clip carries on along the same road, the app continues on it automatically. So record the turns you want as separate rides (videos) that share the road before the junction.
+
 ## HR response panel
 
 Each clear power step (≥ 40 W, held for a minute) gets a fit of the next 2 minutes of heart rate to a first-order response with a dead time: delay, then time constant τ. This is the simple form of the delay and response times in de Leeuw et al. 2025 (see the project's LITERATURE.md). Power drops also give the 60-s HR recovery. The panel shows medians of the fits with R² ≥ 0.8.
@@ -46,4 +65,5 @@ On the Pixel, at home on Wi-Fi: open the address in Chrome, then ⋮ → **Add t
 ```
 python3 Display/tests/check_reference.py   # JS profile/power vs the Python tools
 node Display/tests/check_parsers.mjs        # Bluetooth packets, step fits
+python3 Display/tests/make_video_fixtures.py /tmp/vfix && node Display/tests/check_clips.mjs /tmp/vfix   # video pairing, timing, junctions
 ```

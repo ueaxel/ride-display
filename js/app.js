@@ -1,6 +1,7 @@
-// Ride Display: one page, two screens.
+// Ride Display: one page, three screens.
 //   #trainer - tablet beside the indoor trainer (HR strap + trainer over Bluetooth)
 //   #ghost   - phone on the handlebar, chasing the reference ride (GPS + HR strap)
+//   #video   - Mac (or tablet): full-screen ride video that follows you, panels on top
 import { Reference, IndoorRide, RIDER, profileFromFit } from './reference.js';
 import { bluetoothAvailable, connectHeartRate, connectTrainer, startGps, keepScreenOn, DemoRider } from './sensors.js';
 import { StepFinder } from './hrmodel.js';
@@ -8,6 +9,7 @@ import { RouteMatcher, MovingClock } from './ghost.js';
 import * as D from './draw.js';
 import { buildFit, fitFromZip } from './fitwriter.js';
 import { downloadStreets, saveStreets, loadStreets, deleteStreets } from './streets.js';
+import { initVideoScreen } from './videoscreen.js';
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -17,8 +19,13 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-let mode = location.hash === '#ghost' ? 'ghost' : location.hash === '#trainer' ? 'trainer'
+const MODES = ['trainer', 'ghost', 'video'];
+let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
+const indoorMode = () => mode !== 'ghost';
+let pos = 0, odo = 0, lastTickAt = 0;           // position on the current route / total distance ridden
+let refKey = null;                               // streets storage key of the current route
+let video = null;                                // video screen (videoscreen.js)
 const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg) };
 let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
@@ -39,12 +46,17 @@ function newRide() {
   running = false; clock = new MovingClock(); indoor = new IndoorRide(rider);
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
   offset = 0; finished = null; steps = new StepFinder(); lastFix = null;
+  pos = 0; odo = 0;
+  video?.onNewRide();
   render();
 }
 
 function setMode(m) {
+  const was = mode;
   mode = m; document.body.dataset.mode = m; store.set('mode', m);
   history.replaceState(null, '', '#' + m);
+  if (was === 'video' && m !== 'video') { video?.leave(); const i = store.get('refIndex', 0); if (refs[i]) selectRef(i); }
+  if (m === 'video') video?.enter();
   render();
 }
 
@@ -53,7 +65,7 @@ function selectRef(i) {
   ref = r ? new Reference(r.prof) : null;
   store.set('refIndex', i);
   $('refName').textContent = ref ? ref.name : 'No reference';
-  streets = null; streetsNote = '';
+  streets = null; streetsNote = ''; refKey = ref ? ref.name : null;
   if (ref) loadStreets(ref.name).then(st => {
     if (ref && r && ref.name === r.name) { streets = st; streetsNote = st ? `Streets: ${st.ways.length} saved on this device.` : 'Streets: not downloaded yet.'; showRefInfo(); render(); }
   });
@@ -96,10 +108,12 @@ function tick() {
   if (!running || finished) { render(); return; }
 
   let moving, dist, speed, fix = null;
-  if (mode === 'trainer') {
+  if (indoorMode()) {
     moving = clock.tick(power > 0 || cadence > 0 ? 9 : 0);
+    const before = indoor.dist;
     if (moving) indoor.step(power, 1, ref ? ref.gradeFraction(indoor.dist) : 0);
-    dist = indoor.dist; speed = indoor.speed;
+    dist = indoor.dist; speed = moving ? indoor.speed : 0;
+    odo += dist - before;
   } else {
     fix = now - live.tFix < 5000 ? live.fix : null;
     const prev = last(S.dist) ?? 0;
@@ -109,12 +123,16 @@ function tick() {
     if (fix) lastFix = fix;
     speed = fix && fix.speed != null && fix.speed >= 0 ? fix.speed : Math.max(0, dist - prev);
     moving = clock.tick(speed);
+    odo = dist;
   }
-  if (mode === 'trainer') control(dist, speed);
+  pos = dist; lastTickAt = now; live.moving = moving; live.speedNow = speed;
+  if (indoorMode()) control(dist, speed);
+  if (mode === 'video') video?.onTick();
+  dist = pos;                                     // (the video screen may have switched clips)
   if (!moving) { render(); return; }
 
-  S.power.push(mode === 'trainer' ? power : null);
-  S.cad.push(mode === 'trainer' ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(dist); S.wall.push(now);
+  S.power.push(indoorMode() ? power : null);
+  S.cad.push(indoorMode() ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null);
   const t = clock.seconds;
   if (ref) {
@@ -129,7 +147,28 @@ function tick() {
   } else {
     for (const k of ['refDist', 'gapM', 'gapS', 'refPower', 'refHr']) S[k].push(null);
   }
-  if (mode === 'trainer') steps.update(S.power, S.hr);
+  if (indoorMode()) steps.update(S.power, S.hr);
+  render();
+}
+
+// Switch to another route (video clip) at position p on it, e.g. at a junction.
+// The ghost is lined up with you there; distance ridden carries on.
+function switchRef(newRef, p, key) {
+  ref = newRef; refKey = key || newRef.name;
+  pos = p; indoor.dist = p;
+  offset = clock.seconds - newRef.timeAt(p);
+  finished = null; ctlSent = { v: null, at: 0 };
+  matcher = null;
+  $('refName').textContent = ref.name;
+  streets = null;
+  const want = ref;
+  loadStreets(refKey).then(async st => {
+    if (ref !== want) return;
+    if (!st && navigator.onLine && want.hasRoute) {
+      try { st = await downloadStreets(want.prof); await saveStreets(refKey, st); } catch (e) { st = null; }
+    }
+    if (ref === want) { streets = st; render(); }
+  });
   render();
 }
 
@@ -163,7 +202,7 @@ function control(dist, speed) {
 function setCtlMode(m) {
   ctlMode = m; store.set('ctlMode', m); ctlSent = { v: null, at: 0 };
   $('ctlMode').value = m;
-  if (links.trainer?.control && m !== 'off') control(last(S.dist) ?? 0, last(S.speed) ?? 0);
+  if (links.trainer?.control && m !== 'off') control(pos, last(S.speed) ?? 0);
   render();
 }
 
@@ -179,7 +218,7 @@ function haversine(a, b) {
 function render() {
   if (!S || quiet) return;
   const t = clock.seconds;
-  const you = ref ? Math.min(last(S.dist) ?? 0, ref.total) : null;
+  const you = ref ? Math.min(pos, ref.total) : null;
   const ghost = ref && running ? Math.min(ref.total, ref.distAtTime(t - offset)) : (ref ? 0 : null);
   const gapM = last(S.gapM), gapS = finished ? finished.gapS : last(S.gapS);
   const hr = Date.now() - live.tHr < 5000 ? live.hr : null;
@@ -190,6 +229,7 @@ function render() {
     b.classList.toggle('primary', !running && !finished);
   }
   if (mode === 'trainer') renderTrainer(t, you, ghost, gapM, gapS, hr);
+  else if (mode === 'video') video?.render({ t, you, ghost, gapM, gapS, hr });
   else renderGhost(t, you, ghost, gapM, gapS, hr);
 }
 
@@ -277,7 +317,7 @@ function toggleStart() {
 
 function resync() {
   if (!ref || !running) return;
-  const dist = Math.min(last(S.dist) ?? 0, ref.total);
+  const dist = Math.min(pos, ref.total);
   offset = clock.seconds - ref.timeAt(dist);
   if (S.gapM.length) { S.gapM[S.gapM.length - 1] = 0; S.gapS[S.gapS.length - 1] = 0; }
   navigator.vibrate?.(150);
@@ -312,7 +352,7 @@ function toggleGps() {
 
 function toggleDemo() {
   if (demo || demoGps) { demo = null; demoGps = null; banner(''); render(); return; }
-  if (mode === 'trainer') demo = new DemoRider();
+  if (indoorMode()) demo = new DemoRider();
   else if (ref && ref.hasRoute) demoGps = new DemoGps(ref);
   else { banner('Demo for the handlebar screen needs a reference ride with a route.'); return; }
   banner('Demo data — not from your sensors.');
@@ -361,7 +401,7 @@ function download(blob, ext) {
 
 function saveFit() {
   if (!S.dist.length) { banner('Nothing recorded yet.'); return; }
-  try { download(new Blob([buildFit(S, { indoor: mode === 'trainer' })], { type: 'application/vnd.ant.fit' }), 'fit'); }
+  try { download(new Blob([buildFit(S, { indoor: indoorMode() })], { type: 'application/vnd.ant.fit' }), 'fit'); }
   catch (e) { banner('FIT: ' + e.message); }
 }
 
@@ -439,7 +479,7 @@ $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
 $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
 $('ctlMode').onchange = e => setCtlMode(e.target.value);
-const bump = dw => () => { fixedW = Math.max(50, Math.min(600, fixedW + dw)); store.set('fixedW', fixedW); ctlSent = { v: null, at: 0 }; control(last(S.dist) ?? 0, 0); render(); };
+const bump = dw => () => { fixedW = Math.max(50, Math.min(600, fixedW + dw)); store.set('fixedW', fixedW); ctlSent = { v: null, at: 0 }; control(pos, 0); render(); };
 $('wDown').onclick = bump(-10); $('wUp').onclick = bump(10);
 $('mAllTrainer').onclick = () => { $('dlgMenu').close(); if (links.trainer) { links.trainer.close(); links.trainer = null; } bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData, true); };
 $('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.close(); links.hr = null; } bt('hr', connectHeartRate, $('btnHr'), onHrData, true); };
@@ -463,6 +503,7 @@ $('btnMenu').onclick = () => $('dlgMenu').showModal();
 $('menuClose').onclick = () => $('dlgMenu').close();
 $('mTrainer').onclick = () => { setMode('trainer'); $('dlgMenu').close(); };
 $('mGhost').onclick = () => { setMode('ghost'); $('dlgMenu').close(); };
+$('mVideo').onclick = () => { setMode('video'); $('dlgMenu').close(); };
 $('mDemo').onclick = () => { toggleDemo(); $('dlgMenu').close(); };
 $('mNew').onclick = () => { newRide(); $('dlgMenu').close(); };
 $('mFull').onclick = () => { document.documentElement.requestFullscreen?.().catch(() => {}); $('dlgMenu').close(); };
@@ -472,7 +513,7 @@ $('btnWin').onclick = e => { traceWin = traceWin === 600 ? 1800 : traceWin === 1
 $('zIn').onclick = () => { ghostSpan = Math.max(60, ghostSpan / 1.5); render(); };
 $('zOut').onclick = () => { ghostSpan = Math.min(3000, ghostSpan * 1.5); render(); };
 window.addEventListener('resize', () => render());
-window.addEventListener('hashchange', () => { if (location.hash === '#ghost' || location.hash === '#trainer') setMode(location.hash.slice(1)); });
+window.addEventListener('hashchange', () => { if (MODES.includes(location.hash.slice(1))) setMode(location.hash.slice(1)); });
 
 // ------------------------------------------------------------------ start
 
@@ -480,6 +521,15 @@ $('ctlMode').value = ctlMode;
 for (const id of ['btnHr', 'btnTrainer']) $(id).dataset.label = $(id).textContent;
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
+video = initVideoScreen({
+  get ref() { return ref; }, get streets() { return streets; }, get pos() { return pos; }, get S() { return S; },
+  get running() { return running; }, get finished() { return finished; }, get clock() { return clock; },
+  get steps() { return steps; }, get links() { return links; }, get live() { return live; }, get odo() { return odo; },
+  get ctlMode() { return ctlMode; }, get rider() { return rider; },
+  // position now, between the 1-s ticks (smooth video)
+  posNow() { return live.moving && running && !finished ? pos + (live.speedNow || 0) * Math.min(1.5, (Date.now() - lastTickAt) / 1000) : pos; },
+  switchRef, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
+});
 newRide();
 if (refs.length) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));
 if (!bluetoothAvailable()) banner(window.isSecureContext ? 'This browser has no Web Bluetooth — use Chrome on Android, Mac or Windows.' : 'Open this page over https:// so Bluetooth and GPS can work.');
@@ -488,4 +538,4 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock }; }, buildFit: () => Array.from(buildFit(S, { indoor: mode === 'trainer' })), links, live, setCtlMode };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video }; }, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };

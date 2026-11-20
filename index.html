@@ -84,6 +84,53 @@
   .gfoot button { flex:1; padding:12px 6px; font-size:16px; }
   .gline { display:flex; justify-content:space-between; padding:6px 14px 0; color:var(--muted); font-size:15px; font-variant-numeric: tabular-nums; }
 
+  /* ---------- video screen ---------- */
+  .vonly { display:none; }
+  body[data-mode=video] .vonly { display:inline-flex; }
+  body[data-mode=video] #btnGps { display:none; }
+  #videoScreen { display:none; position:fixed; inset:0; background:#000; overflow:hidden; }
+  body[data-mode=video] #videoScreen { display:block; }
+  body[data-mode=video] header { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(11,15,20,.8); transition: opacity .4s; flex-wrap:nowrap; overflow-x:auto; }
+  body[data-mode=video] #btnCsv, body[data-mode=video] .title { display:none; }
+  body[data-mode=video] .banner { position:fixed; top:58px; left:0; right:0; z-index:19; }
+  body.chromeless header, body.chromeless .banner { opacity:0; pointer-events:none; }
+  body.chromeless { cursor:none; }
+  #vStage { position:absolute; inset:0; }
+  #vStage video.flatvideo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #vStage canvas.sphere { position:absolute; inset:0; width:100%; height:100%; display:none; cursor:grab; touch-action:none; }
+  #vStage[data-kind="360"] canvas.sphere { display:block; }
+  #vStage[data-kind="360"] video.flatvideo { opacity:0; pointer-events:none; }
+  .vmsg { position:absolute; left:50%; top:45%; transform:translate(-50%,-50%); color:#fff; font-size:22px; text-shadow:0 2px 8px #000; text-align:center; pointer-events:none; z-index:5; }
+  .float { position:absolute; z-index:10; background:rgba(11,15,20,.58); border:1px solid rgba(255,255,255,.12); border-radius:14px;
+    display:flex; flex-direction:column; min-width:120px; min-height:80px; overflow:hidden; }
+  .fhead { display:flex; align-items:center; gap:8px; padding:4px 8px 2px 10px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); cursor:move; touch-action:none; user-select:none; }
+  .fhead .fclose { margin-left:auto; background:none; border:none; color:var(--muted); padding:0 4px; font-size:15px; cursor:pointer; }
+  .fhead button:not(.fclose) { padding:1px 7px; font-size:11px; border-radius:6px; text-transform:none; letter-spacing:0; }
+  .fbody { flex:1; min-height:0; position:relative; padding:0 8px 8px; }
+  .grip { position:absolute; right:0; bottom:0; width:18px; height:18px; cursor:nwse-resize; touch-action:none;
+    background: linear-gradient(135deg, transparent 50%, rgba(255,255,255,.35) 50%); border-bottom-right-radius:14px; }
+  body.chromeless .fhead, body.chromeless .grip { opacity:0; }
+  .vnums { display:grid; grid-template-columns: repeat(4, 1fr); gap:2px 12px; height:100%; align-content:center; }
+  .vnums .label { font-size:10px; }
+  .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
+  .vnums .s { font-size:12px; color:var(--ghost); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .junction { position:absolute; left:50%; bottom:5%; transform:translateX(-50%); z-index:12; display:none; flex-direction:column; gap:8px;
+    background:rgba(11,15,20,.75); border:1px solid var(--accent); border-radius:16px; padding:12px 16px; min-width:320px; }
+  .junction .jtitle { color:var(--accent); font-weight:700; font-size:18px; text-align:center; }
+  .junction button { font-size:17px; padding:10px 14px; text-align:left; }
+  #vSync { display:none; position:absolute; z-index:15; left:2%; bottom:3%; width:46%; height:56%; flex-direction:column; gap:8px; padding:10px;
+    background:rgba(11,15,20,.82); border:1px solid var(--accent); border-radius:14px; }
+  #vSync .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  #vSyncMap { flex:1; min-height:120px; cursor:crosshair; }
+  #vSyncSlider { flex:1; }
+  .syncing .float[data-panel], .syncing .junction { display:none !important; }
+  .cliprow { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
+  .cliprow > div { flex:1; font-size:14px; }
+  .cliprow.current b { color:var(--teal); }
+  .muted { color:var(--muted); }
+  #dlgClips { max-width:860px; }
+  #vClipList { max-height:50vh; overflow:auto; }
+
   dialog { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:16px; max-width:520px; width:92vw; }
   dialog::backdrop { background:rgba(0,0,0,.6); }
   dialog label { display:block; margin:10px 0 4px; color:var(--muted); font-size:14px; }
@@ -107,6 +154,9 @@
     <option value="grade">Resistance: route grade</option>
     <option value="fixed">Resistance: fixed watts (ERG)</option>
   </select>
+  <button id="btnClips" class="vonly">Clips</button>
+  <button id="btnPanels" class="vonly">Panels</button>
+  <button id="btnLook" class="vonly" title="Look straight ahead again">Look ahead</button>
   <span class="spacer"></span>
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
@@ -169,7 +219,58 @@
   </div>
 </main>
 
+<!-- ======================= Mac: full-screen video ======================= -->
+<main id="videoScreen">
+  <div id="vStage"></div>
+  <div class="vmsg" id="vMsg"></div>
+  <section class="float" data-panel="numbers"><div class="fhead">Ride<button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><div class="vnums">
+      <div><div class="label">Power</div><div class="v" id="vPower">–</div><div class="s" id="vTarget"></div></div>
+      <div><div class="label">Heart rate</div><div class="v" id="vHr">–</div><div class="s"></div></div>
+      <div><div class="label">Cadence</div><div class="v" id="vCad">–</div><div class="s"></div></div>
+      <div><div class="label">Speed</div><div class="v" id="vSpeed">–</div><div class="s">km/h</div></div>
+      <div><div class="label">Time</div><div class="v" id="vTime">0:00</div><div class="s"></div></div>
+      <div><div class="label">Distance</div><div class="v" id="vDist">0.00</div><div class="s">km</div></div>
+      <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
+    </div></div><div class="grip"></div></section>
+  <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><canvas id="vMap"></canvas></div><div class="grip"></div></section>
+  <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><canvas id="vScatter"></canvas></div><div class="grip"></div></section>
+  <section class="float" data-panel="trace"><div class="fhead">Power &amp; heart rate<button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><canvas id="vTrace"></canvas></div><div class="grip"></div></section>
+  <div class="junction" id="vJunction"></div>
+  <div id="vSync">
+    <div><b>Sync video and route</b> <span class="muted" id="vSyncHint">Find a spot you can recognise in the video (a crossing, a bridge, a turn), then click that spot on the map.</span></div>
+    <div class="row"><button id="vSyncBack10">−10 s</button><button id="vSyncBack1">−1 s</button><button id="vSyncPlay">▶︎ / ❚❚</button>
+      <button id="vSyncFwd1">+1 s</button><button id="vSyncFwd10">+10 s</button><input type="range" id="vSyncSlider" min="0" max="0" step="1"></div>
+    <div class="muted" id="vSyncTime"></div>
+    <canvas id="vSyncMap"></canvas>
+    <div class="row" style="justify-content:flex-end"><button id="vSyncDone" class="primary">Done</button></div>
+  </div>
+</main>
+
 <!-- ======================= dialogs ======================= -->
+<dialog id="dlgClips">
+  <h2 style="margin-top:0">Ride videos</h2>
+  <p>Put each ride's video (360° equirectangular .mp4 from GoPro Player, or a normal video) and the watch's <b>.fit</b> (or Garmin Connect <b>.zip</b>) of the same ride in one folder. Videos are matched to rides by recording time, or else by the same file name.</p>
+  <div class="row" style="justify-content:flex-start">
+    <button id="vFolder" class="primary">Choose video folder…</button>
+    <button id="vReopen">Open last folder</button>
+    <label style="margin:0">or pick files: <input type="file" id="vFiles" multiple accept="video/*,.fit,.zip"></label>
+  </div>
+  <p id="vClipNotes"></p>
+  <div id="vClipList"></div>
+  <div class="row"><button id="vClipsClose" class="primary">Close</button></div>
+</dialog>
+
+<dialog id="dlgPanels">
+  <h2 style="margin-top:0">Panels</h2>
+  <p>Drag a panel by its title, resize it at the bottom-right corner. Positions are kept on this computer.</p>
+  <div class="row" style="justify-content:flex-start" id="vPanelList"></div>
+  <div class="row"><button id="vPanelsReset">Reset layout</button><button id="vPanelsClose" class="primary">Close</button></div>
+</dialog>
+
 <dialog id="dlgRef">
   <h2 style="margin-top:0">Reference ride</h2>
   <p>Pick the original ride's <b>.fit</b> file, or the <b>.zip</b> straight from Garmin Connect (the activity → ⚙ → Export Original). Rides without a power meter get power estimated from speed, grade and weight, as in <code>tools/estimate_power.py</code>.</p>
@@ -194,6 +295,7 @@
   <div class="row" style="justify-content:flex-start">
     <button id="mTrainer">Trainer screen (tablet)</button>
     <button id="mGhost">Handlebar screen (phone)</button>
+    <button id="mVideo">Video screen (Mac)</button>
   </div>
   <div class="row" style="justify-content:flex-start">
     <button id="mDemo">Demo data on/off</button>
