@@ -19,6 +19,13 @@ When you load a reference, the page also downloads the streets within about 200 
 
 - **Trainer:** connect the HR strap and the trainer, then press **Start** when you start the watch. Your distance on the route comes from your power, using the same physics as `IndoorRide.mc`. The ghost is where the original ride was after the same moving time.
 - **Handlebar:** connect GPS and the HR strap, then press **Start** at the spot where the original ride started. The clock runs only while you move. Your GPS position is matched onto the original route, so you don't see the speed jumps you got from GPS speed. A red *off route* label means you are on a detour, and distance is counted from GPS until you're back on the route.
+- **Resistance** (menu in the top bar, tablet only): the tablet can set the R200's resistance over Bluetooth (FTMS):
+  - *ghost power (ERG)*: the original ride's power over the next few seconds of road (between 60 and 600 W), like Ride Repro's indoor mode on the watch
+  - *route grade*: the R200 simulates the slope of the route at your position
+  - *fixed watts (ERG)*: a constant target, set with −10 / +10, for HR step tests
+  - *watch / none*: the tablet only listens.
+
+  Only one device can control the trainer. When the tablet controls it, don't link the trainer in the watch app (Ride Repro / HrPw), and set the watch activity's Smart Trainer option to off or Free Ride. The watch still records power and HR over ANT+.
 - **Reset gap** lines the ghost up with you again, like the Lap button on the watch.
 - **Save CSV** (or ☰ → Save CSV) saves every second of the ride, plus the fitted power steps.
 - ☰ → **Demo data** fills the screen with simulated data so you can try it without sensors.

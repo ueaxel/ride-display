@@ -26,7 +26,10 @@ let streetsNote = '';
 const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0 };
 const links = {};
 let S, running, clock, indoor, matcher, offset, finished, steps, demo = null, demoGps = null;
-let quiet = false;           // tests: skip drawing while fast-forwarding
+let quiet = false;
+// Trainer control from the tablet: 'off' (listen only), 'ghost' (ERG = original
+// ride's power just ahead), 'grade' (route slope), 'fixed' (ERG at fixedW).
+let ctlMode = store.get('ctlMode', 'off'), fixedW = store.get('fixedW', 150), ctlSent = { v: null, at: 0 };           // tests: skip drawing while fast-forwarding
 let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = null;
 
 function newRide() {
@@ -106,6 +109,7 @@ function tick() {
     speed = fix && fix.speed != null && fix.speed >= 0 ? fix.speed : Math.max(0, dist - prev);
     moving = clock.tick(speed);
   }
+  if (mode === 'trainer') control(dist, speed);
   if (!moving) { render(); return; }
 
   S.power.push(mode === 'trainer' ? power : null);
@@ -125,6 +129,40 @@ function tick() {
     for (const k of ['refDist', 'gapM', 'gapS', 'refPower', 'refHr']) S[k].push(null);
   }
   if (mode === 'trainer') steps.update(S.power, S.hr);
+  render();
+}
+
+// What the trainer should do now; sent when it changed enough or every 10 s.
+function controlTarget(dist, speed) {
+  if (ctlMode === 'fixed') return { kind: 'power', v: fixedW };
+  if (!ref || finished) return null;
+  const d = Math.min(dist, ref.total);
+  if (ctlMode === 'ghost' && ref.hasPower) {
+    // original power over the next ~2-8 s of road: the R200 needs 2-3 s to respond
+    let s = 0;
+    for (let k = 2; k <= 8; k++) s += ref.at('p', Math.min(ref.total, d + Math.max(speed, 3) * k));
+    return { kind: 'power', v: Math.max(60, Math.min(600, Math.round(s / 7 / 5) * 5)) };
+  }
+  if (ctlMode === 'grade') return { kind: 'grade', v: Math.round(ref.gradeFraction(d) * 200) / 200 };   // 0.5 % steps
+  return null;
+}
+
+function control(dist, speed) {
+  const c = links.trainer?.control;
+  if (!c || ctlMode === 'off' || demo) return;
+  const t = controlTarget(dist, speed);
+  if (!t) return;
+  const now = Date.now();
+  const changed = ctlSent.v === null || ctlSent.kind !== t.kind || Math.abs(t.v - ctlSent.v) >= (t.kind === 'power' ? 5 : 0.005);
+  if (!changed && now - ctlSent.at < 10000) return;
+  ctlSent = { kind: t.kind, v: t.v, at: now };
+  c.apply(t.kind, t.v).then(() => render());
+}
+
+function setCtlMode(m) {
+  ctlMode = m; store.set('ctlMode', m); ctlSent = { v: null, at: 0 };
+  $('ctlMode').value = m;
+  if (links.trainer?.control && m !== 'off') control(last(S.dist) ?? 0, last(S.speed) ?? 0);
   render();
 }
 
@@ -165,7 +203,18 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   $('tState').textContent = !running ? (t ? 'stopped' : 'press Start') : finished ? 'reference distance reached' : clock.now - clock.lastMove > 3 ? 'paused' : 'riding';
   $('tDist').textContent = ((last(S.dist) ?? 0) / 1000).toFixed(2);
   const rp = last(S.refPower), rh = last(S.refHr);
-  $('tPowerRef').textContent = ref && ref.hasPower && rp != null ? `ghost ${Math.round(rp)} W${ref.prof.powerEstimated ? ' (est.)' : ''}` : '';
+  const ctl = links.trainer?.control;
+  const ghostTxt = ref && ref.hasPower && rp != null ? `ghost ${Math.round(rp)} W${ref.prof.powerEstimated ? ' (est.)' : ''}` : '';
+  let ctlTxt = '';
+  if (ctlMode !== 'off') {
+    if (!links.trainer) ctlTxt = 'connect the trainer';
+    else if (!ctl) ctlTxt = 'trainer has no FTMS control';
+    else ctlTxt = ctl.message || (running ? 'waiting…' : 'press Start');
+  }
+  $('tPowerRef').textContent = ctlTxt ? ctlTxt + (ghostTxt && ctlMode !== 'ghost' ? ' · ' + ghostTxt : '') : ghostTxt;
+  $('tPowerRef').className = 'sub' + (ctl && ctl.last && !ctl.last.ok ? ' bad' : '');
+  $('fixedRow').style.display = ctlMode === 'fixed' ? 'flex' : 'none';
+  $('fixedW').textContent = `${fixedW} W`;
   $('tHrRef').textContent = rh ? `ghost ${Math.round(rh)} bpm` : '';
   $('tSpeedRef').textContent = ref && you != null ? `ghost ${ref.at('v', you).toFixed(1)} km/h` : 'km/h on the route';
   $('tDistRef').textContent = ref ? `of ${(ref.total / 1000).toFixed(2)} km` : 'km';
@@ -378,6 +427,9 @@ const onTrainerData = d => {
 $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
 $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
+$('ctlMode').onchange = e => setCtlMode(e.target.value);
+const bump = dw => () => { fixedW = Math.max(50, Math.min(600, fixedW + dw)); store.set('fixedW', fixedW); ctlSent = { v: null, at: 0 }; control(last(S.dist) ?? 0, 0); render(); };
+$('wDown').onclick = bump(-10); $('wUp').onclick = bump(10);
 $('mAllTrainer').onclick = () => { $('dlgMenu').close(); if (links.trainer) { links.trainer.close(); links.trainer = null; } bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData, true); };
 $('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.close(); links.hr = null; } bt('hr', connectHeartRate, $('btnHr'), onHrData, true); };
 $('btnStart').onclick = $('gStart').onclick = toggleStart;
@@ -412,6 +464,7 @@ window.addEventListener('hashchange', () => { if (location.hash === '#ghost' || 
 
 // ------------------------------------------------------------------ start
 
+$('ctlMode').value = ctlMode;
 for (const id of ['btnHr', 'btnTrainer']) $(id).dataset.label = $(id).textContent;
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
@@ -423,4 +476,4 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock }; } };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock }; }, links, live, setCtlMode };

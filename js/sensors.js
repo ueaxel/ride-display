@@ -135,6 +135,11 @@ export async function connectTrainer(onData, onStatus, showAll = false) {
       ch.addEventListener('characteristicvaluechanged', e => onData(parseIndoorBikeData(e.target.value)));
       await ch.startNotifications();
       link.protocol = 'FTMS';
+      try {                                   // control point: lets the tablet set resistance
+        const cp = await svc.getCharacteristic(0x2AD9);
+        if (!link.control) link.control = new FtmsControl();
+        await link.control.attach(cp);
+      } catch (e) { link.control = null; }
     } catch (e) {
       const parse = makeCyclingPowerParser();
       const svc = await server.getPrimaryService('cycling_power');
@@ -145,6 +150,65 @@ export async function connectTrainer(onData, onStatus, showAll = false) {
     }
   });
   return link;
+}
+
+// ------------------------------------------------------------ trainer control (FTMS)
+
+// FTMS Fitness Machine Control Point (0x2AD9). Each command is answered with
+// an indication [0x80, opcode, result]; result 1 = success.
+export const FTMS_RESULT = { 1: 'ok', 2: 'not supported', 3: 'invalid value', 4: 'failed', 5: 'not allowed (another device has control)' };
+
+export function powerCommand(watts) {
+  const w = Math.max(0, Math.min(2000, Math.round(watts)));
+  return [0x05, w & 0xFF, (w >> 8) & 0xFF];
+}
+// grade as a fraction (0.05 = 5 %); crr and cw (= 0.5 * rho * CdA, kg/m)
+export function simCommand(grade, crr = 0.0055, cw = 0.2) {
+  const g = Math.max(-2000, Math.min(2000, Math.round(grade * 10000)));   // 0.01 %
+  const gg = g < 0 ? g + 65536 : g;
+  return [0x11, 0, 0, gg & 0xFF, (gg >> 8) & 0xFF, Math.round(crr * 10000) & 0xFF, Math.round(cw * 100) & 0xFF];
+}
+
+export class FtmsControl {
+  constructor() { this.cp = null; this.hasControl = false; this.queue = Promise.resolve(); this.waiting = null; this.message = ''; this.last = null; }
+  async attach(cp) {
+    this.cp = cp; this.hasControl = false;
+    cp.addEventListener('characteristicvaluechanged', e => {
+      const v = e.target.value;
+      if (v.getUint8(0) === 0x80 && this.waiting) { const w = this.waiting; this.waiting = null; w(v.getUint8(2)); }
+    });
+    await cp.startNotifications();       // indications
+  }
+  // send one command and wait (max 3 s) for its answer
+  send(bytes) {
+    const run = async () => {
+      if (!this.cp) throw new Error('no control point');
+      const answer = new Promise(res => { this.waiting = res; setTimeout(() => { if (this.waiting === res) { this.waiting = null; res(0); } }, 3000); });
+      await this.cp.writeValueWithResponse(new Uint8Array(bytes));
+      return answer;
+    };
+    const p = this.queue.then(run, run);
+    this.queue = p.catch(() => {});
+    return p;
+  }
+  async ensureControl() {
+    if (this.hasControl) return true;
+    const r = await this.send([0x00]);                 // Request Control
+    this.hasControl = r === 1;
+    this.message = r === 1 ? 'tablet controls the trainer' : `control refused: ${FTMS_RESULT[r] || 'no answer'}`;
+    if (this.hasControl) await this.send([0x07]);      // Start / Resume
+    return this.hasControl;
+  }
+  async apply(kind, value) {
+    try {
+      if (!(await this.ensureControl())) return false;
+      const r = await this.send(kind === 'power' ? powerCommand(value) : simCommand(value));
+      if (r === 5) this.hasControl = false;
+      this.last = { kind, value, ok: r === 1, at: Date.now() };
+      this.message = r === 1 ? (kind === 'power' ? `ERG ${Math.round(value)} W` : `grade ${(value * 100).toFixed(1)} %`) : `trainer: ${FTMS_RESULT[r] || 'no answer'}`;
+      return r === 1;
+    } catch (e) { this.hasControl = false; this.message = 'trainer: ' + e.message; return false; }
+  }
 }
 
 // ------------------------------------------------------------ GPS

@@ -27,6 +27,7 @@
   header { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
   header .title { font-weight:700; margin-right:6px; }
   header .spacer { flex:1; }
+  header select { background:#1C2530; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
   .refname { color:var(--ghost); max-width:220px; overflow:hidden; text-overflow:ellipsis; }
   .banner { background:#3A2A10; color:var(--accent); padding:8px 12px; font-size:14px; display:none; }
   .banner.show { display:block; }
@@ -100,6 +101,12 @@
   <button id="btnTrainer" class="chip wide" data-state="off">Trainer</button>
   <button id="btnGps" class="chip" data-state="off">GPS</button>
   <button id="btnRef"><span class="refname" id="refName">No reference</span></button>
+  <select id="ctlMode" class="wide" title="Who sets the trainer's resistance">
+    <option value="off">Resistance: watch / none</option>
+    <option value="ghost">Resistance: ghost power (ERG)</option>
+    <option value="grade">Resistance: route grade</option>
+    <option value="fixed">Resistance: fixed watts (ERG)</option>
+  </select>
   <span class="spacer"></span>
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
@@ -111,7 +118,8 @@
 <!-- ======================= tablet: indoor trainer ======================= -->
 <main id="trainer">
   <div class="tiles">
-    <div class="tile"><div class="label">Power 3 s</div><div class="v" id="tPower">–</div><div class="sub" id="tPowerRef"></div></div>
+    <div class="tile"><div class="label">Power 3 s</div><div class="v" id="tPower">–</div><div class="sub" id="tPowerRef"></div>
+      <div id="fixedRow" style="display:none;gap:6px;align-items:center;margin-top:4px"><button id="wDown">−10</button><b id="fixedW" style="min-width:60px;text-align:center">150 W</b><button id="wUp">+10</button></div></div>
     <div class="tile"><div class="label">Heart rate</div><div class="v" id="tHr">–</div><div class="sub" id="tHrRef"></div></div>
     <div class="tile"><div class="label">Cadence</div><div class="v" id="tCad">–</div><div class="sub">rpm</div></div>
     <div class="tile"><div class="label">Speed</div><div class="v" id="tSpeed">–</div><div class="sub" id="tSpeedRef">km/h on the route</div></div>

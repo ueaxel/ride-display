@@ -1,6 +1,7 @@
 // node Display/tests/check_parsers.mjs — Bluetooth packet parsers and the step finder.
 import { parseIndoorBikeData, parseHeartRate, makeCyclingPowerParser, DemoRider } from '../js/sensors.js';
 import { StepFinder } from '../js/hrmodel.js';
+import { powerCommand, simCommand } from '../js/sensors.js';
 const dv = bytes => new DataView(new Uint8Array(bytes).buffer);
 let fails = 0;
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? 'ok  ' : 'FAIL', name, ok ? '' : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
@@ -16,6 +17,9 @@ check('HR skin contact', parseHeartRate(dv([0x06, 61])).contact, true);
 const cp = makeCyclingPowerParser();
 cp(dv([0x20, 0x00, 0xFA, 0x00, 0x0A, 0x00, 0x00, 0x04]));
 check('Cycling power + cadence', cp(dv([0x20, 0x00, 0xFA, 0x00, 0x0B, 0x00, 0xAB, 0x06])), { power: 250, cadence: 60 / ((0x06AB - 0x0400) / 1024) });
+check('FTMS set power 250 W', powerCommand(250), [0x05, 0xFA, 0x00]);
+check('FTMS grade +5 %', simCommand(0.05), [0x11, 0, 0, 0xF4, 0x01, 55, 20]);
+check('FTMS grade -2.5 %', simCommand(-0.025), [0x11, 0, 0, 0x06, 0xFF, 55, 20]);
 // step finder on the demo rider (6-s delay, tau 25 s up / 40 s down)
 const d = new DemoRider(), P = [], H = [];
 for (let i = 0; i < 1200; i++) { const s = d.next(); P.push(s.power); H.push(s.hr); }
