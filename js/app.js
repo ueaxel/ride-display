@@ -6,6 +6,7 @@ import { bluetoothAvailable, connectHeartRate, connectTrainer, startGps, keepScr
 import { StepFinder } from './hrmodel.js';
 import { RouteMatcher, MovingClock } from './ghost.js';
 import * as D from './draw.js';
+import { buildFit, fitFromZip } from './fitwriter.js';
 import { downloadStreets, saveStreets, loadStreets, deleteStreets } from './streets.js';
 
 const $ = id => document.getElementById(id);
@@ -113,7 +114,7 @@ function tick() {
   if (!moving) { render(); return; }
 
   S.power.push(mode === 'trainer' ? power : null);
-  S.cad.push(cadence); S.hr.push(hr); S.speed.push(speed); S.dist.push(dist); S.wall.push(now);
+  S.cad.push(mode === 'trainer' ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(dist); S.wall.push(now);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null);
   const t = clock.seconds;
   if (ref) {
@@ -346,13 +347,22 @@ function saveCsv() {
     rows.push('', 'step_at_s,direction,from_w,to_w,delay_s,tau_s,amplitude_bpm,r2,hrr60_bpm');
     for (const s of steps.steps) rows.push([s.t, s.up ? 'up' : 'down', f(s.pre), f(s.post), s.delay, f(s.tau, 1), f(s.A, 1), f(s.r2, 3), f(s.hrr60, 1)].join(','));
   }
-  const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' });
+  download(new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }), 'csv');
+}
+
+function download(blob, ext) {
   const a = document.createElement('a');
   const d = new Date(S.wall[0]);
   const stamp = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-  a.href = URL.createObjectURL(blob); a.download = `RideDisplay_${mode}_${stamp}.csv`;
+  a.href = URL.createObjectURL(blob); a.download = `RideDisplay_${mode}_${stamp}.${ext}`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function saveFit() {
+  if (!S.dist.length) { banner('Nothing recorded yet.'); return; }
+  try { download(new Blob([buildFit(S, { indoor: mode === 'trainer' })], { type: 'application/vnd.ant.fit' }), 'fit'); }
+  catch (e) { banner('FIT: ' + e.message); }
 }
 
 // ------------------------------------------------------------------ reference dialog
@@ -377,9 +387,10 @@ function showRefInfo(extra = '') {
 
 async function loadRefFile(file) {
   try {
-    const buf = await file.arrayBuffer();
+    let buf = await file.arrayBuffer();
+    if (/\.zip$/i.test(file.name) || new Uint8Array(buf, 0, 2).join() === '80,75') buf = await fitFromZip(buf);
     const untilKm = parseFloat($('refUntil').value) || null;
-    const base = file.name.replace(/\.fit$/i, '');
+    const base = file.name.replace(/\.(fit|zip)$/i, '');
     const prof = profileFromFit(buf, { untilKm, rider, name: base + (untilKm ? ` (to ${untilKm} km)` : '') });
     refs = refs.filter(r => r.name !== prof.name);
     refs.unshift({ name: prof.name, prof: compact(prof) });
@@ -435,6 +446,7 @@ $('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.clo
 $('btnStart').onclick = $('gStart').onclick = toggleStart;
 $('btnResync').onclick = $('gResync').onclick = resync;
 $('btnCsv').onclick = $('mCsv').onclick = saveCsv;
+$('btnFit').onclick = $('mFit').onclick = saveFit;
 $('btnRef').onclick = () => { fillRefList(); $('riderKg').value = rider.riderKg; showRefInfo(); $('dlgRef').showModal(); };
 $('refClose').onclick = () => $('dlgRef').close();
 $('refList').onchange = e => selectRef(+e.target.value);
@@ -476,4 +488,4 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock }; }, links, live, setCtlMode };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock }; }, buildFit: () => Array.from(buildFit(S, { indoor: mode === 'trainer' })), links, live, setCtlMode };

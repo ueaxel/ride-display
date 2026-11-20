@@ -11,7 +11,7 @@ The watch is not involved and the iPhone doesn't need to be connected. The watch
 
 ## Reference ride
 
-Tap the purple reference button and pick the original ride's `.fit` file: Garmin Connect → activity → ⚙ → *Export Original*, then unzip. This is the same file you drag into `Make Ride Repro Reference.command`. The page builds the same profile as `tools/make_reference.py`. If the ride has no power, it estimates power the same way `tools/estimate_power.py` does. Optional: *use the ride only up to … km*. The page keeps up to 6 references on the device.
+Tap the purple reference button and pick the original ride's `.fit` file, or the `.zip` you get from Garmin Connect → activity → ⚙ → *Export Original*, without unzipping it. This is the same file you drag into `Make Ride Repro Reference.command`. The page builds the same profile as `tools/make_reference.py`. If the ride has no power, it estimates power the same way `tools/estimate_power.py` does. Optional: *use the ride only up to … km*. The page keeps up to 6 references on the device.
 
 When you load a reference, the page also downloads the streets within about 200 m of the route from OpenStreetMap (Overpass API) and stores them on the device. That download needs internet, so do it at home. If it fails, use **Download streets** in the same dialog.
 
@@ -27,6 +27,7 @@ When you load a reference, the page also downloads the streets within about 200 
 
   Only one device can control the trainer. When the tablet controls it, don't link the trainer in the watch app (Ride Repro / HrPw), and set the watch activity's Smart Trainer option to off or Free Ride. The watch still records power and HR over ANT+.
 - **Reset gap** lines the ghost up with you again, like the Lap button on the watch.
+- **Save FIT** saves the ride as a .fit activity file in Downloads. Import it at connect.garmin.com (cloud/upload icon → Import Data; the Garmin Connect phone app can't import files), or into Strava or GoldenCheetah. If the watch recorded the same ride, keep only one of the two in Garmin Connect.
 - **Save CSV** (or ☰ → Save CSV) saves every second of the ride, plus the fitted power steps.
 - ☰ → **Demo data** fills the screen with simulated data so you can try it without sensors.
 

@@ -110,6 +110,7 @@
   <span class="spacer"></span>
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
+  <button id="btnFit" class="wide">Save FIT</button>
   <button id="btnCsv" class="wide">Save CSV</button>
   <button id="btnMenu">☰</button>
 </header>
@@ -171,11 +172,11 @@
 <!-- ======================= dialogs ======================= -->
 <dialog id="dlgRef">
   <h2 style="margin-top:0">Reference ride</h2>
-  <p>Pick the original ride's <b>.fit</b> file (Garmin Connect → the activity → ⚙ → Export Original, unzip). Rides without a power meter get power estimated from speed, grade and weight, as in <code>tools/estimate_power.py</code>.</p>
+  <p>Pick the original ride's <b>.fit</b> file, or the <b>.zip</b> straight from Garmin Connect (the activity → ⚙ → Export Original). Rides without a power meter get power estimated from speed, grade and weight, as in <code>tools/estimate_power.py</code>.</p>
   <label>Saved references</label>
   <select id="refList"></select>
   <label>New reference from a .fit file</label>
-  <input type="file" id="refFile" accept=".fit,application/octet-stream">
+  <input type="file" id="refFile" accept=".fit,.zip,application/octet-stream,application/zip">
   <label>Use the ride only up to … km (optional, e.g. to skip a long descent)</label>
   <input type="number" id="refUntil" step="0.01" min="0" placeholder="whole ride">
   <label>Rider weight, kg (power estimate and indoor speed)</label>
@@ -197,6 +198,7 @@
   <div class="row" style="justify-content:flex-start">
     <button id="mDemo">Demo data on/off</button>
     <button id="mNew">New ride (clear)</button>
+    <button id="mFit">Save FIT</button>
     <button id="mCsv">Save CSV</button>
     <button id="mFull">Full screen</button>
   </div>
