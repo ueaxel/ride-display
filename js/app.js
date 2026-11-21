@@ -21,7 +21,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '22 (21 Nov 2026, free ride map, my rides)';
+export const APP_VERSION = '23 (21 Nov 2026, faster map download, free ride choice)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -68,6 +68,7 @@ function setMode(m) {
 
 function selectRef(i) {
   const r = refs[i];
+  if (!r) i = -1;
   ref = r ? new Reference(r.prof) : null;
   store.set('refIndex', i);
   $('refName').textContent = ref ? ref.name : 'No reference';
@@ -460,7 +461,7 @@ function saveFit() {
 function fillRefList() {
   const sel = $('refList');
   sel.innerHTML = '';
-  if (!refs.length) sel.innerHTML = '<option value="-1">(none yet)</option>';
+  sel.innerHTML = '<option value="-1">No reference (free ride)</option>';
   refs.forEach((r, i) => { const o = document.createElement('option'); o.value = i; o.textContent = r.name; sel.appendChild(o); });
   sel.value = String(Math.max(-1, Math.min(refs.length - 1, store.get('refIndex', 0))));
 }
@@ -555,8 +556,10 @@ async function getArea(km) {
   }
   if (!navigator.onLine) { $('areaInfo').textContent = 'No internet: do this at home on Wi-Fi.'; return; }
   $('areaInfo').textContent = 'Downloading…';
-  const r = await downloadArea(f.lat, f.lon, km, (done, total, failed) => {
-    $('areaInfo').textContent = `Downloading streets: ${done} of ${total} squares${failed ? ` (${failed} failed: busy map server, try again later)` : ''}…`;
+  const r = await downloadArea(f.lat, f.lon, km, (done, total, failed, note) => {
+    $('areaInfo').textContent = `Downloading streets: ${done} of ${total} squares${failed ? `, ${failed} failed` : ''}… ${note || ''}` +
+      ' (the free map server can be slow: keep this screen open; the nearest streets come first)';
+    area.ensure(f.lat, f.lon, false).then(() => render());
   });
   $('areaInfo').textContent = `Done: streets within ${km} km stored on this phone${r.failed ? ` (${r.failed} squares failed: tap again later to fill them in)` : ''}.`;
   areaAt = null; area.tiles.clear(); area.ensure(f.lat, f.lon, false).then(() => render());
@@ -661,7 +664,7 @@ video = initVideoScreen({
   switchRef, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
 });
 newRide();
-if (refs.length) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));
+if (refs.length && store.get('refIndex', 0) >= 0) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));
 if (!bluetoothAvailable()) banner(window.isSecureContext ? 'This browser has no Web Bluetooth — use Chrome on Android, Mac or Windows.' : 'Open this page over https:// so Bluetooth and GPS can work.');
 keepScreenOn();
 setInterval(tick, 1000);

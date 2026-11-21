@@ -84,6 +84,6 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 
 ## Riding without a reference (phone)
 
-- With no reference loaded, the phone screen is a **free ride**: big speed, distance and time, average speed, and a map around you that turns with your direction and shows your track so far.
+- Choose **No reference (free ride)** in the reference list (or load none): the phone screen is a **free ride**: big speed, distance and time, average speed, and a map around you that turns with your direction and shows your track so far.
 - **☰ → Download map around me** (5 or 10 km) stores OpenStreetMap streets on the phone in squares of about 2 × 2 km, so the map works without internet. On rides with internet, missing squares load by themselves.
 - **☰ → My rides**: every ride (outdoor or indoor) is kept on the device, saved every 30 s and when you stop, so it survives a reload. Each one has **Save FIT** (Garmin Connect / Strava), **Use as reference** (race it next time) and **Delete**. The newest 30 are kept.
