@@ -19,6 +19,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
+export const APP_VERSION = '21 (21 Nov 2026, riding layout)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -511,7 +512,7 @@ $('refDelete').onclick = () => {
   deleteStreets(refs[i].name);
   refs.splice(i, 1); store.set('refs', refs); fillRefList(); selectRef(refs.length ? 0 : -1);
 };
-$('btnMenu').onclick = () => $('dlgMenu').showModal();
+$('btnMenu').onclick = () => { $('appVersion').textContent = 'Version ' + APP_VERSION; $('dlgMenu').showModal(); };
 $('menuClose').onclick = () => $('dlgMenu').close();
 $('mTrainer').onclick = () => { setMode('trainer'); $('dlgMenu').close(); };
 $('mGhost').onclick = () => { setMode('ghost'); $('dlgMenu').close(); };
