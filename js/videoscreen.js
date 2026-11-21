@@ -236,7 +236,7 @@ export function initVideoScreen(api) {
   // Find a recognisable spot in the video, then click it on the map.
   let syncClip = -1;
   function openSync(i) {
-    syncing = true; syncClip = i;
+    syncing = true; syncClip = i; syncChanged = false;
     const c = clips[i];
     if (cur !== i) { cur = i; view.load(c.url); api.switchRef(c.ref, Math.max(0, c.videoRange[0]), 'clip:' + c.id); }
     screen.classList.add('syncing');
@@ -244,7 +244,12 @@ export function initVideoScreen(api) {
     view.video.pause();
     drawSync();
   }
-  function closeSync() { syncing = false; screen.classList.remove('syncing'); $('vSync').style.display = 'none'; draw(); }
+  function closeSync() {
+    syncing = false; screen.classList.remove('syncing'); $('vSync').style.display = 'none';
+    const c = clips[syncClip];
+    if (c && !api.running) api.switchRef(c.ref, Math.max(0, c.videoRange[0]), 'clip:' + c.id);   // start where the video starts
+    draw();
+  }
   function drawSync() {
     if (!syncing) return;
     const c = clips[syncClip], v = view.video;
@@ -259,7 +264,22 @@ export function initVideoScreen(api) {
   $('vSyncFwd1').onclick = () => seek(1); $('vSyncFwd10').onclick = () => seek(10);
   $('vSyncPlay').onclick = () => { const v = view.video; v.playbackRate = 1; v.paused ? v.play() : v.pause(); };
   $('vSyncSlider').oninput = e => { view.video.currentTime = +e.target.value; };
-  $('vSyncDone').onclick = closeSync;
+  let syncChanged = false;
+  $('vSyncDone').onclick = () => {
+    if (!syncChanged && !clips[syncClip]?.synced) {
+      $('vSyncHint').innerHTML = '<span class="warn">Not saved yet:</span> tap <b>Ride starts here</b> at the moment you started the watch, or click the matching spot on the map. Tap Done again to close anyway.';
+      syncChanged = true; return;
+    }
+    closeSync();
+  };
+  // the watch recording started at this video moment (ride clock 0 s)
+  $('vSyncStart').onclick = async () => {
+    const c = clips[syncClip];
+    c.v0 = -view.video.currentTime; c.synced = true; syncChanged = true;
+    await saveClip(c);
+    $('vSyncHint').textContent = `Saved: the ride starts at video ${fmtMin(view.video.currentTime)}. Check a spot later in the ride on the map, then Done.`;
+    drawSync();
+  };
   view.video.addEventListener('timeupdate', () => drawSync());
   $('vSyncMap').addEventListener('click', async e => {
     const c = clips[syncClip], cv = $('vSyncMap'), map = cv._toScreen;
@@ -273,7 +293,7 @@ export function initVideoScreen(api) {
     }
     if (!best || best.dd > 40 ** 2) { $('vSyncHint').textContent = 'Click closer to the route.'; return; }
     c.v0 = c.ref.elapsedAt(best.d) - view.video.currentTime;
-    c.synced = true;
+    c.synced = true; syncChanged = true;
     await saveClip(c);
     $('vSyncHint').textContent = `Synced: video 0:00 = ride +${fmtMin(Math.max(0, c.v0))}. Check another spot to confirm, then Done.`;
     drawSync();
