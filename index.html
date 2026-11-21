@@ -76,7 +76,7 @@
   .zoom { position:absolute; right:8px; top:8px; display:flex; flex-direction:column; gap:6px; }
   .zoom button { width:44px; height:44px; padding:0; font-size:22px; }
   .offroute { position:absolute; left:8px; top:8px; background:var(--red); color:#fff; border-radius:8px; padding:4px 8px; font-size:13px; display:none; }
-  .gnums { display:grid; grid-template-columns: 1fr 1fr; gap:6px; padding:0 10px; }
+  .gnums { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:6px; padding:0 10px; }
   .gnum { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 10px; }
   .gnum .v { font-size:min(11vw, 6vh); font-weight:700; line-height:1.05; font-variant-numeric: tabular-nums; }
   .gnum .r { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:min(5.5vw, 3vh); color:var(--ghost); font-variant-numeric: tabular-nums; }
@@ -91,7 +91,8 @@
   #videoScreen { display:none; position:fixed; inset:0; background:#000; overflow:hidden; }
   body[data-mode=video] #videoScreen { display:block; }
   body[data-mode=video] header { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(11,15,20,.8); transition: opacity .4s; flex-wrap:nowrap; overflow-x:auto; }
-  body[data-mode=video] #btnCsv, body[data-mode=video] #btnFit, body[data-mode=video] .title { display:none; }
+  body[data-mode=video] #btnFit, body[data-mode=video] .title { display:none; }
+  body[data-mode=trainer] #btnGps { display:none; }
   body[data-mode=video] .banner { position:fixed; top:58px; left:0; right:0; z-index:19; }
   body.chromeless header, body.chromeless .banner { opacity:0; pointer-events:none; }
   body.chromeless { cursor:none; }
@@ -167,7 +168,6 @@
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
   <button id="btnFit" class="wide">Save FIT</button>
-  <button id="btnCsv" class="wide">Save CSV</button>
   <button id="btnFull" title="Full screen (key F)">⛶</button>
   <button id="btnMenu">☰</button>
 </header>

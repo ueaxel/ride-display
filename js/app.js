@@ -67,6 +67,7 @@ function selectRef(i) {
   $('refName').textContent = ref ? ref.name : 'No reference';
   streets = null; streetsNote = ''; refKey = ref ? ref.name : null;
   if (ref) loadStreets(ref.name).then(st => {
+    if (st && !st.ways.length) st = null;
     if (ref && r && ref.name === r.name) { streets = st; streetsNote = st ? `Streets: ${st.ways.length} saved on this device.` : 'Streets: not downloaded yet.'; showRefInfo(); render(); }
   });
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
@@ -164,6 +165,7 @@ function switchRef(newRef, p, key) {
   const want = ref;
   loadStreets(refKey).then(async st => {
     if (ref !== want) return;
+    if (st && !st.ways.length) st = null;           // an empty download from a busy server: try again
     if (!st && navigator.onLine && want.hasRoute) {
       try { st = await downloadStreets(want.prof); await saveStreets(refKey, st); } catch (e) { st = null; }
     }
@@ -485,7 +487,7 @@ $('mAllTrainer').onclick = () => { $('dlgMenu').close(); if (links.trainer) { li
 $('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.close(); links.hr = null; } bt('hr', connectHeartRate, $('btnHr'), onHrData, true); };
 $('btnStart').onclick = $('gStart').onclick = toggleStart;
 $('btnResync').onclick = $('gResync').onclick = resync;
-$('btnCsv').onclick = $('mCsv').onclick = saveCsv;
+$('mCsv').onclick = saveCsv;
 $('btnFit').onclick = $('mFit').onclick = saveFit;
 $('btnRef').onclick = () => { fillRefList(); $('riderKg').value = rider.riderKg; showRefInfo(); $('dlgRef').showModal(); };
 $('refClose').onclick = () => $('dlgRef').close();

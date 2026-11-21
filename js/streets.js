@@ -3,7 +3,8 @@
 // the device (IndexedDB), so the map shows streets offline on the bike.
 // Map data © OpenStreetMap contributors (ODbL).
 
-const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const BUFFER_M = 200;
 const M_PER_DEG_LAT = 110540.0;
 const M_PER_DEG_LON = 111320.0;
@@ -26,20 +27,35 @@ function routeLatLon(prof, every = 150) {
   return pts;
 }
 
+// One bounding box per ~1.5 km of route (plus BUFFER_M around it): the
+// "around a line" query of Overpass returned nothing in practice. The
+// boxes are filtered down to BUFFER_M from the route afterwards.
 export function overpassQuery(prof) {
-  const line = routeLatLon(prof).map(([a, b]) => `${a.toFixed(5)},${b.toFixed(5)}`).join(',');
+  const pts = routeLatLon(prof, 25);
+  const dLat = BUFFER_M / M_PER_DEG_LAT, dLon = BUFFER_M / (M_PER_DEG_LON * Math.cos(prof.lat0 * Math.PI / 180));
+  const boxes = [];
+  for (let i = 0; i < pts.length; i += 60) {
+    const chunk = pts.slice(i, i + 61);
+    const la = chunk.map(p => p[0]), lo = chunk.map(p => p[1]);
+    boxes.push([Math.min(...la) - dLat, Math.min(...lo) - dLon, Math.max(...la) + dLat, Math.max(...lo) + dLon].map(v => v.toFixed(5)).join(','));
+  }
   const types = Object.keys(CLASS).join('|');
-  return `[out:json][timeout:90];(` +
-    `way(around:${BUFFER_M},${line})["highway"~"^(${types})$"];` +
-    `way(around:${BUFFER_M},${line})["natural"="water"];` +
-    `way(around:${BUFFER_M},${line})["waterway"~"^(river|canal|stream)$"];` +
-    `);out geom qt;`;
+  const parts = boxes.flatMap(b => [`way(${b})["highway"~"^(${types})$"];`, `way(${b})["natural"="water"];`, `way(${b})["waterway"~"^(river|canal|stream)$"];`]);
+  return `[out:json][timeout:90];(${parts.join('')});out geom qt;`;
 }
 
 // Overpass JSON -> compact local geometry in the reference's metres (x east, y north).
 export function toLocal(json, prof) {
   const coslat = Math.cos(prof.lat0 * Math.PI / 180);
   const ways = [];
+  // route points on a 100-m grid, to keep only ways near the route
+  const grid = new Set();
+  const cell = (x, y) => `${Math.floor(x / 100)},${Math.floor(y / 100)}`;
+  const reach = Math.ceil(BUFFER_M / 100);
+  for (let i = 0; i < prof.d.length; i += 4) {
+    const cx = Math.floor(prof.x[i] / 100), cy = Math.floor(prof.y[i] / 100);
+    for (let a = -reach; a <= reach; a++) for (let b = -reach; b <= reach; b++) grid.add(`${cx + a},${cy + b}`);
+  }
   for (const el of json.elements || []) {
     if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
     const t = el.tags || {};
@@ -52,6 +68,9 @@ export function toLocal(json, prof) {
       p.push(x, y);
       x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
     }
+    let near = false;
+    for (let i = 0; i < p.length && !near; i += 2) near = grid.has(cell(p[i], p[i + 1]));
+    if (!near) continue;
     const w = { c: cls, p, b: [x0, y0, x1, y1] };
     if (t.name && cls <= 2) w.n = t.name;
     if (cls === 9) w.area = t.natural === 'water';
@@ -68,8 +87,12 @@ export async function downloadStreets(prof) {
   for (const url of SERVERS) {
     try {
       const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-      if (!r.ok) throw new Error(`map server answered ${r.status}`);
-      return toLocal(await r.json(), prof);
+      if (!r.ok) throw new Error(`map server answered ${r.status}${r.status === 429 ? ' (busy)' : ''}`);
+      const j = await r.json();
+      // a busy server can answer "OK" with no data and a remark: try the next one
+      if (j.remark && !(j.elements || []).length) throw new Error('map server: ' + j.remark.slice(0, 80));
+      if (!(j.elements || []).length) throw new Error('map server returned no streets');
+      return toLocal(j, prof);
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
@@ -142,8 +165,12 @@ export function drawStreets(ctx, streets, toScreen, scale, view, labels = true) 
   if (!view) return;
   ctx.font = '600 13px system-ui'; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   let k = 0;
+  const boxes = [];                               // skip labels that would overlap
   for (const [name, { x, y }] of [...named.entries()].sort((a, b) => a[1].c - b[1].c)) {
-    if (k++ >= 8) break;
+    if (k >= 8) break;
+    const w = ctx.measureText(name).width, box = [x - w / 2 - 4, y - 10, x + w / 2 + 4, y + 8];
+    if (boxes.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+    boxes.push(box); k++;
     ctx.lineWidth = 4; ctx.strokeStyle = '#0B0F14'; ctx.strokeText(name, x, y + 4);
     ctx.fillStyle = '#C9D1DB'; ctx.fillText(name, x, y + 4);
   }

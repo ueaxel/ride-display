@@ -127,7 +127,8 @@ export function initVideoScreen(api) {
     fillClipList();
     // streets for each clip (online, once)
     for (const c of clips) {
-      if (!(await loadStreets('clip:' + c.id)) && navigator.onLine && c.ref.hasRoute) {
+      const have = await loadStreets('clip:' + c.id);
+      if (!(have && have.ways.length) && navigator.onLine && c.ref.hasRoute) {
         try { await saveStreets('clip:' + c.id, await downloadStreets(c.prof)); } catch (e) { /* later */ }
       }
     }
