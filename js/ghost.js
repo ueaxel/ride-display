@@ -64,8 +64,16 @@ export class RouteMatcher {
       // small backwards jitter is ignored; real reversals over 30 m are kept
       if (m.dist > this.dist || this.dist - m.dist > 30) this.dist = m.dist;
     } else {
-      this.offRoute = true;            // detour: count GPS distance until back
-      this.dist += moved;
+      // off the route: progress = the nearest point of the route ahead of
+      // where you left it (a parallel street moves you on; on a loop that comes
+      // back to where you left, it comes back with you, so the gap changes
+      // smoothly instead of jumping when you rejoin)
+      this.offRoute = true;
+      const ahead = this.nearest(x, y, this.idx ?? 0, (this.idx ?? 0) + Math.ceil(1500 / step));
+      if (ahead && ahead.off < 400) {
+        const lim = Math.max(moved, 1);                      // follows you both ways, never faster than you move
+        this.dist = Math.max(this.dist - lim, Math.min(this.dist + lim, ahead.dist));
+      }
     }
     return this.dist;
   }
