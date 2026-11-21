@@ -143,6 +143,24 @@
   #dlgClips { max-width:860px; }
   #vClipList { max-height:50vh; overflow:auto; }
 
+  /* ---------- phone, riding: map full screen, numbers float on it ---------- */
+  #ghost { position:relative; }
+  .peekbtn { display:none; }
+  body.riding[data-mode=ghost]:not(.peek) header, body.riding[data-mode=ghost] .banner { display:none; }
+  body.riding.peek[data-mode=ghost] header { position:fixed; top:0; left:0; right:0; z-index:30; background:rgba(11,15,20,.85); }
+  body.riding #ghost > * { position:relative; z-index:2; }
+  body.riding #gmapWrap { position:absolute !important; inset:0; margin:0; border-radius:0; border:none; z-index:0 !important; }
+  body.riding #gmapWrap .zoom { top:auto; bottom:30%; }
+  body.riding .gapbox, body.riding .gaugelab, body.riding .gline { text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 6px #000; }
+  body.riding .gapbig, body.riding .gapsec { -webkit-text-stroke: 1.5px rgba(0,0,0,.65); paint-order: stroke fill; }
+  body.riding .gnums { margin-top:auto; }
+  body.riding .gnum { background:rgba(11,15,20,.45); border-color:rgba(255,255,255,.08); text-shadow:0 0 3px #000, 0 1px 5px #000; }
+  body.riding .gfoot button { background:rgba(28,37,48,.55); }
+  body.riding .gfoot button.stop { background:rgba(232,82,74,.75); }
+  body.riding #ghost > #gPeek { display:block; position:absolute; top:8px; right:8px; z-index:5; width:40px; height:40px; padding:0;
+    background:rgba(11,15,20,.45); border:1px solid rgba(255,255,255,.15); border-radius:10px; font-size:18px; }
+  body.riding #gOff { z-index:3; }
+
   dialog { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:16px; max-width:520px; width:92vw; }
   dialog::backdrop { background:rgba(0,0,0,.6); }
   dialog label { display:block; margin:10px 0 4px; color:var(--muted); font-size:14px; }
@@ -217,6 +235,7 @@
   </div>
   <canvas id="gauge"></canvas>
   <div class="gaugelab"><span>◀ behind</span><span>ahead ▶</span></div>
+  <button id="gPeek" class="peekbtn" title="Show the top bar">☰</button>
   <div id="gmapWrap"><canvas id="gmap"></canvas>
     <div class="offroute" id="gOff">off route</div>
     <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button></div></div>

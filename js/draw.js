@@ -43,7 +43,7 @@ function arrow(ctx, x, y, angle, size) {
 // Route coloured by grade, with you and the ghost.
 //   view 'all'    - whole route, north up
 //   view 'follow' - heading up around you, `span` metres of road ahead
-export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null } = {}) {
+export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null } = {}) {
   const ctx = fit(canvas);
   if (!ref) return message(ctx, 'Load a reference ride to see its route');
   if (!ref.hasRoute) return message(ctx, 'The reference ride has no GPS route');
@@ -62,14 +62,15 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
     const [ax, ay] = ref.xy(Math.min(ref.total, d + 25));
     const [bx, by] = ref.xy(Math.max(0, d - 25));
     const head = Math.atan2(ax - bx, ay - by);           // radians from north
-    const s = (ctx.h * 0.7) / span;                       // `span` m from arrow to top
-    const sx = ctx.w / 2, sy = ctx.h * 0.78;
+    const s = (ctx.h * (anchor - 0.08)) / span;           // `span` m from arrow to top
+    const sx = ctx.w / 2, sy = ctx.h * anchor;
     const c = Math.cos(head), sn = Math.sin(head);
     toScreen = (x, y) => { const dx = x - cx, dy = y - cy; return [sx + s * (dx * c - dy * sn), sy - s * (dx * sn + dy * c)]; };
     scale = s; cull = { cx, cy, r: Math.hypot(ctx.w, ctx.h) / s };
   }
   canvas._toScreen = toScreen;                 // for clicks on the map (video sync)
   if (streets) {
+    ctx.labelZone = labelZone;                   // street names only in this band (0..1 of the height)
     drawStreets(ctx, streets, toScreen, scale, cull);
     ctx.fillStyle = '#6B7685'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
     ctx.fillText('© OpenStreetMap contributors', 6, ctx.h - 5);
@@ -93,7 +94,7 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   if (ghost != null) {
     let [gx, gy] = toScreen(...ref.xy(ghost));
     if (view === 'follow') {          // out of view: wait at the edge, in its direction
-      const m = 16, cx = ctx.w / 2, cy = ctx.h * 0.78;
+      const m = 16, cx = ctx.w / 2, cy = ctx.h * anchor;
       const k = Math.min(1, ...[gx < m ? (cx - m) / (cx - gx) : 1, gx > ctx.w - m ? (ctx.w - m - cx) / (gx - cx) : 1,
         gy < m ? (cy - m) / (cy - gy) : 1, gy > ctx.h - m ? (ctx.h - m - cy) / (gy - cy) : 1]);
       gx = cx + (gx - cx) * k; gy = cy + (gy - cy) * k;

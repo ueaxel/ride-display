@@ -230,6 +230,9 @@ function render() {
     b.classList.toggle('stop', running && !finished);
     b.classList.toggle('primary', !running && !finished);
   }
+  // phone while riding: map fills the screen, numbers float on top, top bar hidden
+  const ridingNow = mode === 'ghost' && running && !finished;
+  if (document.body.classList.contains('riding') !== ridingNow) document.body.classList.toggle('riding', ridingNow);
   if (mode === 'trainer') renderTrainer(t, you, ghost, gapM, gapS, hr);
   else if (mode === 'video') video?.render({ t, you, ghost, gapM, gapS, hr });
   else renderGhost(t, you, ghost, gapM, gapS, hr);
@@ -306,7 +309,9 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   $('gDist').textContent = `${((last(S.dist) ?? 0) / 1000).toFixed(2)} km`;
   $('gLeft').textContent = ref ? `${(Math.max(0, ref.total - (you ?? 0)) / 1000).toFixed(2)} km to go` : '';
   $('gOff').style.display = matcher && matcher.offRoute ? 'block' : 'none';
-  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: ghostSpan, done: you ?? 0, streets });
+  const riding = document.body.classList.contains('riding');
+  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets,
+    anchor: riding ? 0.64 : 0.78, labelZone: riding ? [0.3, 0.7] : null });
 }
 
 // ------------------------------------------------------------------ actions
@@ -480,6 +485,11 @@ const onTrainerData = d => {
 $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
 $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
+let peekTimer = null;
+$('gPeek').onclick = () => {           // riding layout: show the top bar for a few seconds
+  document.body.classList.add('peek'); clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => document.body.classList.remove('peek'), 6000);
+};
 $('ctlMode').onchange = e => setCtlMode(e.target.value);
 const bump = dw => () => { fixedW = Math.max(50, Math.min(600, fixedW + dw)); store.set('fixedW', fixedW); ctlSent = { v: null, at: 0 }; control(pos, 0); render(); };
 $('wDown').onclick = bump(-10); $('wUp').onclick = bump(10);

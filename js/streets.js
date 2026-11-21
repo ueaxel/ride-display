@@ -153,7 +153,8 @@ export function drawStreets(ctx, streets, toScreen, scale, view, labels = true) 
       for (let i = 0; i + 3 < w.p.length; i += 2) {
         const [ax, ay] = toScreen(w.p[i], w.p[i + 1]), [bx, by] = toScreen(w.p[i + 2], w.p[i + 3]);
         const x = (ax + bx) / 2, y = (ay + by) / 2;
-        if (x < 50 || x > ctx.w - 50 || y < 20 || y > ctx.h - 20) continue;
+        const z = ctx.labelZone || [0, 1];
+        if (x < 50 || x > ctx.w - 50 || y < Math.max(20, z[0] * ctx.h) || y > Math.min(ctx.h - 20, z[1] * ctx.h)) continue;
         const dd = (x - ctx.w / 2) ** 2 + (y - ctx.h / 2) ** 2;
         if (!best || dd < best.dd) best = { x, y, dd };
       }
