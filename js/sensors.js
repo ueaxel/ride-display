@@ -220,8 +220,8 @@ export function startGps(onFix, onError) {
       lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy,
       speed: pos.coords.speed, heading: pos.coords.heading, time: pos.timestamp,
     }),
-    err => onError?.(err.message),
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    err => { if (err.code !== 3) onError?.(err.message); },   // 3 = timeout: no new position while standing still
+    { enableHighAccuracy: true, maximumAge: 0 });
   return { close: () => navigator.geolocation.clearWatch(id) };
 }
 
