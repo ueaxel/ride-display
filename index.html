@@ -69,6 +69,9 @@
   body[data-mode=ghost] header { flex-wrap:nowrap; }
   body[data-mode=ghost] header button { padding:7px 9px; flex:none; }
   body[data-mode=ghost] header #btnRef { flex:1 1 auto; min-width:0; }
+  /* phone: short labels (HR, Cad) with the status dot; the device name is in the tooltip */
+  body[data-mode=ghost] header .chip[data-short] { font-size:0; gap:0; }
+  body[data-mode=ghost] header .chip[data-short]::after { content:attr(data-short); font-size:15px; margin-left:6px; }
   body[data-mode=ghost] .refname { display:block; max-width:100%; white-space:nowrap; }
   body[data-mode=ghost] header .spacer { display:none; }
   .gapbox { text-align:center; padding:6px 10px 0; }
@@ -188,8 +191,9 @@
 <body data-mode="trainer">
 <header>
   <span class="title">Ride Display</span>
-  <button id="btnHr" class="chip" data-state="off">HR strap</button>
+  <button id="btnHr" class="chip" data-short="HR" data-state="off">HR strap</button>
   <button id="btnTrainer" class="chip wide" data-state="off">Trainer</button>
+  <button id="btnCad" class="chip" data-short="Cad" data-state="off">Cadence</button>
   <button id="btnGps" class="chip" data-state="off">GPS</button>
   <button id="btnRef"><span class="refname" id="refName">No reference</span></button>
   <select id="ctlMode" class="wide" title="Who sets the trainer's resistance">
@@ -259,7 +263,7 @@
     <div class="gnum"><div class="label" id="gSpeedLabel">Speed km/h</div><div class="v" id="gSpeed">–</div><div class="r" id="gSpeedRef"></div></div>
     <div class="gnum"><div class="label">Power 3 s W</div><div class="v" id="gPow">–</div><div class="r" id="gPowRef"></div></div>
   </div>
-  <div class="gline"><span id="gTime">0:00</span><span id="gDist">0.00 km</span><span id="gLeft"></span></div>
+  <div class="gline"><span id="gTime">0:00</span><span id="gDist">0.00 km</span><span id="gCad"></span><span id="gLeft"></span></div>
   <div class="gfoot">
     <button id="gStart" class="primary">Start</button>
     <button id="gResync">Reset gap</button>
@@ -399,6 +403,7 @@
   <div class="row" style="justify-content:flex-start">
     <button id="mAllTrainer">Trainer not listed? Show all devices</button>
     <button id="mAllHr">HR strap: show all devices</button>
+    <button id="mAllCad">Cadence sensor: show all devices</button>
   </div>
   <p>Tablet: connect the <b>HR strap</b> and the <b>trainer</b> (both over Bluetooth; the watch keeps the trainer on ANT+), press <b>Start</b> as you start the watch.<br>
   Phone: connect the <b>HR strap</b> and <b>GPS</b>, press <b>Start</b> at the spot where the original ride started.<br>

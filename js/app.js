@@ -3,7 +3,7 @@
 //   #ghost   - phone on the handlebar, chasing the reference ride (GPS + HR strap)
 //   #video   - Mac (or tablet): full-screen ride video that follows you, panels on top
 import { Reference, IndoorRide, RIDER, profileFromFit } from './reference.js';
-import { bluetoothAvailable, connectHeartRate, connectTrainer, startGps, keepScreenOn, DemoRider } from './sensors.js';
+import { bluetoothAvailable, connectHeartRate, connectTrainer, connectCadence, startGps, keepScreenOn, DemoRider } from './sensors.js';
 import { StepFinder } from './hrmodel.js';
 import { RouteMatcher, MovingClock } from './ghost.js';
 import * as D from './draw.js';
@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '26 (21 Nov 2026, smoother off-route gap)';
+export const APP_VERSION = '27 (21 Nov 2026, cadence sensor)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -41,7 +41,7 @@ let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
 let streets = null;                              // OSM streets along the reference route
 let streetsNote = '';
-const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0 };
+const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0 };
 const links = {};
 let S, running, clock, indoor, matcher, offset, finished, steps, demo = null, demoGps = null;
 let quiet = false;
@@ -131,7 +131,8 @@ function tick() {
   }
   if (demoGps) { live.fix = demoGps.next(); live.tFix = now; }
   const power = now - live.tPower < 3000 ? live.power ?? 0 : 0;
-  const cadence = now - live.tPower < 3000 ? live.cadence ?? 0 : 0;
+  const cadence = now - live.tCad < 3000 ? live.cadSensor ?? 0          // cadence sensor first, then the trainer's
+    : now - live.tPower < 3000 ? live.cadence ?? 0 : 0;
   const hr = now - live.tHr < 5000 ? live.hr : null;
   if (!running || finished) { render(); return; }
 
@@ -172,7 +173,7 @@ function tick() {
   S.power.push(indoorMode() ? power : null);
   const pNow = indoorMode() ? power : outPower.p3 ?? 0;
   S.pEst.push(Math.round(pNow)); S.work.push((last(S.work) ?? 0) + pNow);
-  S.cad.push(indoorMode() ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
+  S.cad.push(indoorMode() || links.cad ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null); S.alt.push(fix && fix.alt != null ? fix.alt : null);
   if (fix) { trail.push(area.xy(fix.lat, fix.lon)); if (matcher) refTrail.push(matcher.toXY(fix.lat, fix.lon)); }
   if (S.wall.length % 10 === 0) saveRide(S, mode, rideState());   // kept on the phone as you ride
@@ -419,6 +420,8 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   $('gSpeed').textContent = free ? (t > 0 ? ((last(S.dist) ?? 0) / t * 3.6).toFixed(1) : '–') : sp != null && running ? (sp * 3.6).toFixed(1) : '–';
   $('gSpeedRef').textContent = ref && you != null ? `ghost ${ref.at('v', you).toFixed(1)}` + (ref.hasPower ? ` · ${Math.round(ref.at('p', you))} W` : '') : '';
   $('gTime').textContent = fmtTime(t);
+  const cadNow = Date.now() - live.tCad < 3000 ? live.cadSensor : null;
+  $('gCad').textContent = links.cad ? `${cadNow ?? '–'} rpm` : '';
   $('gDist').textContent = `${((last(S.dist) ?? 0) / 1000).toFixed(2)} km`;
   $('gLeft').textContent = ref ? `${(Math.max(0, ref.total - (you ?? 0)) / 1000).toFixed(2)} km to go` : '';
   $('gOff').style.display = matcher && matcher.offRoute ? 'block' : 'none';
@@ -718,6 +721,10 @@ const onHrData = d => {
   if (d.contact === false) { live.hr = null; return; }      // strap off: no reading, not a stale one
   live.hr = d.hr; live.tHr = Date.now();
 };
+const onCadData = d => {
+  if (d.crank) { live.cadSensor = d.cadence; live.tCad = Date.now(); }
+  else if (d.wheel && !live.cadWarned) { live.cadWarned = true; banner('The cadence sensor is in speed mode (on the wheel hub). For cadence: take the battery out, put it back, and mount it on the crank (CYCPLUS: see its manual for switching modes).'); }
+};
 const onTrainerData = d => {
   if (d.power != null) live.power = d.power;
   if (d.cadence != null) live.cadence = d.cadence;
@@ -727,6 +734,8 @@ const onTrainerData = d => {
 $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
 $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
+$('btnCad').onclick = () => bt('cad', connectCadence, $('btnCad'), onCadData);
+$('mAllCad').onclick = () => { $('dlgMenu').close(); if (links.cad) { links.cad.close(); links.cad = null; } bt('cad', connectCadence, $('btnCad'), onCadData, true); };
 $('mRides').onclick = () => { $('dlgMenu').close(); showRides(); };
 $('ridesClose').onclick = () => $('dlgRides').close();
 $('mArea').onclick = () => { $('dlgMenu').close(); showArea(); };
@@ -814,7 +823,7 @@ window.addEventListener('hashchange', () => { if (MODES.includes(location.hash.s
 // ------------------------------------------------------------------ start
 
 $('ctlMode').value = ctlMode;
-for (const id of ['btnHr', 'btnTrainer']) $(id).dataset.label = $(id).textContent;
+for (const id of ['btnHr', 'btnTrainer', 'btnCad']) $(id).dataset.label = $(id).textContent;
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
 video = initVideoScreen({

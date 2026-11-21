@@ -74,6 +74,47 @@ export async function connectHeartRate(onData, onStatus, showAll = false) {
   return link;
 }
 
+// ------------------------------------------------------------ cadence sensor
+
+// Cycling Speed and Cadence (0x1816), measurement 0x2A5B: cumulative crank
+// revolutions + time of the last crank event (1/1024 s). Cadence from the
+// difference between two events; 0 when no new revolution for 3 s.
+// (Dual sensors like the CYCPLUS send ANT+ and Bluetooth at the same time:
+// the watch reads ANT+, the phone Bluetooth.)
+export function makeCscParser() {
+  let lastRevs = null, lastTime = null, lastChange = 0, rpm = 0;
+  return dv => {
+    const f = dv.getUint8(0);
+    let p = 1;
+    const out = {};
+    if (f & 0x01) { out.wheel = true; p += 6; }                 // wheel data: sensor is in speed mode
+    if (f & 0x02) {
+      out.crank = true;
+      const revs = dv.getUint16(p, true), time = dv.getUint16(p + 2, true), now = Date.now();
+      if (lastRevs !== null) {
+        const dr = (revs - lastRevs + 65536) % 65536, dt = ((time - lastTime + 65536) % 65536) / 1024;
+        if (dr > 0 && dt > 0 && dr < 20) { rpm = 60 * dr / dt; lastChange = now; }
+        else if (now - lastChange > 3000) rpm = 0;
+      }
+      if (lastRevs === null || revs !== lastRevs) { lastRevs = revs; lastTime = time; }
+      out.cadence = Math.round(Math.min(220, rpm));
+    }
+    return out;
+  };
+}
+
+export async function connectCadence(onData, onStatus, showAll = false) {
+  const link = new BleLink('Cadence', onStatus);
+  await link.open(showAll ? { acceptAllDevices: true, optionalServices: ['cycling_speed_and_cadence'] }
+    : { filters: [{ services: ['cycling_speed_and_cadence'] }, { namePrefix: 'CYCPLUS' }], optionalServices: ['cycling_speed_and_cadence'] }, async server => {
+    const parse = makeCscParser();
+    const ch = await (await server.getPrimaryService('cycling_speed_and_cadence')).getCharacteristic('csc_measurement');
+    ch.addEventListener('characteristicvaluechanged', e => onData(parse(e.target.value)));
+    await ch.startNotifications();
+  });
+  return link;
+}
+
 // ------------------------------------------------------------ trainer
 
 // FTMS Indoor Bike Data (0x2AD2). Returns speed km/h, cadence rpm, power W, hr.

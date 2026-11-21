@@ -96,3 +96,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 - **Turn-backs**: a stretch of the reference ridden back and forth is shown in the reference dialog on a small map, with **Cut it out** / **Keep it**.
 - **Reset gap without touching the screen**: Enter, space, Page Up/Down or arrow keys (Bluetooth remote or keyboard), headset buttons, and the volume keys if Chrome passes them on. **Settings → Button test** shows what arrives.
 - A ride carries on after the page reloads (within 3 h): same ride, same gap, same trail; GPS restarts by itself, the HR strap needs one tap. On the reference map your own path is drawn too (shows detours).
+
+## Cadence sensor
+
+**Cadence** (phone: **Cad**) connects a Bluetooth cadence sensor (Cycling Speed and Cadence, e.g. CYCPLUS). Its cadence is shown on the phone, saved in the ride and the .fit, and on the tablet it takes the place of the trainer's cadence. Dual ANT+/Bluetooth sensors work with the watch and the phone at the same time: pair the watch over **ANT+**, the phone uses Bluetooth.
