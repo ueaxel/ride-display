@@ -43,7 +43,7 @@ function arrow(ctx, x, y, angle, size) {
 // Route coloured by grade, with you and the ghost.
 //   view 'all'    - whole route, north up
 //   view 'follow' - heading up around you, `span` metres of road ahead
-export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null } = {}) {
+export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null, trail = null } = {}) {
   const ctx = fit(canvas);
   if (!ref) return message(ctx, 'Load a reference ride to see its route');
   if (!ref.hasRoute) return message(ctx, 'The reference ride has no GPS route');
@@ -91,6 +91,12 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   ctx.globalAlpha = 1;
   const [sx0, sy0] = toScreen(P.x[0], P.y[0]);
   dot(ctx, sx0, sy0, 4, '#fff');
+  if (trail && trail.length > 1) {                // where you actually rode (shows detours)
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = C.teal; ctx.setLineDash([]);
+    ctx.beginPath();
+    trail.forEach(([x, y], i) => { const [px, py] = toScreen(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    ctx.stroke();
+  }
   if (ghost != null) {
     let [gx, gy] = toScreen(...ref.xy(ghost));
     if (view === 'follow') {          // out of view: wait at the edge, in its direction
@@ -296,4 +302,23 @@ export function drawFreeMap(canvas, streets, { you = null, heading = 0, trail = 
     }
   }
   arrow(ctx, sx, sy, 0, 16);
+}
+
+// A stretch ridden back and forth (refedit.findTurnBacks): the route around it,
+// the part that would be cut in red.
+export function drawTurnBack(canvas, P, tb) {
+  const ctx = fit(canvas);
+  const st = P.step || 5, pad = Math.round(250 / st);
+  const a = Math.max(0, tb.i0 - pad), b = Math.min(P.d.length - 1, tb.i1 + pad);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = a; i <= b; i++) { x0 = Math.min(x0, P.x[i]); x1 = Math.max(x1, P.x[i]); y0 = Math.min(y0, P.y[i]); y1 = Math.max(y1, P.y[i]); }
+  const s = Math.min((ctx.w - 30) / Math.max(1, x1 - x0), (ctx.h - 30) / Math.max(1, y1 - y0));
+  const ox = (ctx.w - s * (x1 - x0)) / 2, oy = (ctx.h - s * (y1 - y0)) / 2;
+  const T = (x, y) => [ox + s * (x - x0), ctx.h - oy - s * (y - y0)];
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const line = (i0, i1, w, col) => { ctx.lineWidth = w; ctx.strokeStyle = col; ctx.beginPath(); for (let i = i0; i <= i1; i++) { const [px, py] = T(P.x[i], P.y[i]); i === i0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); } ctx.stroke(); };
+  line(a, b, 5, '#8A94A3');
+  line(tb.i0, tb.i1, 3, '#E8524A');
+  const [ex, ey] = T(P.x[tb.i0], P.y[tb.i0]);
+  dot(ctx, ex, ey, 5, '#FFFFFF');
 }

@@ -12,15 +12,16 @@ function db() {
 }
 const KEEP = 30;                    // newest rides kept
 
-export async function saveRide(S, mode) {
+export async function saveRide(S, mode, state = null) {
   if (!S.wall.length) return;
   const id = String(S.wall[0]);
-  const r2 = (a, f) => a.map(v => v == null ? null : Math.round(v * f) / f);
+  const r = (a, f) => a.map(v => v == null ? null : Math.round(v * f) / f);
+  const dec = { speed: 100, dist: 10, lat: 1e6, lon: 1e6, alt: 10, refDist: 10, gapM: 10, gapS: 10, refPower: 1, refHr: 1, work: 1 };
+  const S2 = {};
+  for (const [k, a] of Object.entries(S)) S2[k] = dec[k] ? r(a, dec[k]) : a;
   const rec = {
     id, mode, start: S.wall[0], end: S.wall[S.wall.length - 1], seconds: S.wall.length,
-    dist: S.dist[S.dist.length - 1] || 0, hasGps: S.lat.some(v => v != null),
-    S: { power: S.power, hr: S.hr, cad: S.cad, speed: r2(S.speed, 100), dist: r2(S.dist, 10), lat: r2(S.lat, 1e6), lon: r2(S.lon, 1e6),
-      alt: r2(S.alt || [], 10), wall: S.wall },
+    dist: S.dist[S.dist.length - 1] || 0, hasGps: S.lat.some(v => v != null), S: S2, state,
   };
   try {
     const d = await db();

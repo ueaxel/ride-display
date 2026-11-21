@@ -12,6 +12,8 @@ import { downloadStreets, saveStreets, loadStreets, deleteStreets } from './stre
 import { initVideoScreen } from './videoscreen.js';
 import { AreaMap, downloadArea, countTiles } from './areamap.js';
 import { saveRide, listRides, deleteRide } from './myrides.js';
+import { ironStops, findTurnBacks, cutTurnBack, workProfile } from './refedit.js';
+import { OutdoorPower } from './power.js';
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -21,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '23 (21 Nov 2026, faster map download, free ride choice)';
+export const APP_VERSION = '24 (21 Nov 2026, power, work gap, stops, turn-backs)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -31,7 +33,10 @@ let refKey = null;                               // streets storage key of the c
 let video = null;                                // video screen (videoscreen.js)
 const area = new AreaMap();                      // offline streets for riding without a reference
 let areaAt = null, trail = [], heading = 0;      // last area check, your track (area metres), direction
-const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg) };
+const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg), ...store.get('rider', {}) };
+// ironStops: smooth stops out of the reference; liveStops: after you stop, put the gap back to where it was before you slowed
+const settings = { ironStops: true, liveStops: true, ...store.get('settings', {}) };
+let outPower = null, refWork = null, refNote = '', stopEp = null, wasMoving = false, refTrail = [];
 let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
 let streets = null;                              // OSM streets along the reference route
@@ -46,9 +51,11 @@ let ctlMode = store.get('ctlMode', 'off'), fixedW = store.get('fixedW', 150), ct
 let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = null;
 
 function newRide() {
+  if (S && S.wall.length) saveRide(S, mode, { open: false });     // the ride you had is kept, closed
   S = { power: [], hr: [], cad: [], speed: [], dist: [], refDist: [], gapM: [], gapS: [], refPower: [], refHr: [],
-    lat: [], lon: [], alt: [], wall: [] };
-  trail = [];
+    lat: [], lon: [], alt: [], wall: [], pEst: [], work: [] };
+  trail = []; refTrail = []; stopEp = null; wasMoving = false;
+  outPower = new OutdoorPower(rider);
   running = false; clock = new MovingClock(); indoor = new IndoorRide(rider);
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
   offset = 0; finished = null; steps = new StepFinder(); lastFix = null;
@@ -69,7 +76,17 @@ function setMode(m) {
 function selectRef(i) {
   const r = refs[i];
   if (!r) i = -1;
-  ref = r ? new Reference(r.prof) : null;
+  ref = null; refNote = '';
+  if (r) {
+    let prof = r.prof;
+    if (settings.ironStops && prof.t && prof.v) {
+      const it = ironStops(prof);
+      prof = it.prof;
+      if (it.smoothed.length) refNote = `Stops smoothed out: ${it.smoothed.length} (the ghost is ${it.smoothed.reduce((a, b) => a + b.seconds, 0)} s faster for it).`;
+    }
+    ref = new Reference(prof);
+  }
+  refWork = ref ? workProfile(ref.prof) : null;
   store.set('refIndex', i);
   $('refName').textContent = ref ? ref.name : 'No reference';
   streets = null; streetsNote = ''; refKey = ref ? ref.name : null;
@@ -79,7 +96,10 @@ function selectRef(i) {
   });
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
   if (matcher && S && S.dist.length) matcher.dist = S.dist[S.dist.length - 1];
+  rebuildRefTrail();
   showRefInfo();
+  if (r && findTurnBacks(r.prof).filter(tb => !(r.prof.kept || []).includes(tb.d0)).length)
+    banner('This reference rides a stretch back and forth: tap its name at the top to check it.');
   render();
 }
 
@@ -138,16 +158,24 @@ function tick() {
     odo = dist;
   }
   pos = dist; lastTickAt = now; live.moving = moving; live.speedNow = speed;
+  if (!indoorMode()) {
+    const onRoute = ref && matcher && !matcher.offRoute && ref.hasAlt;
+    outPower.update(moving ? speed : 0, odo, fix && fix.alt != null ? fix.alt : null, onRoute ? ref.gradeFraction(Math.min(dist, ref.total)) : null);
+    if (ref && settings.liveStops) stopWatch(moving, speed, dist);
+  }
+  wasMoving = moving;
   if (indoorMode()) control(dist, speed);
   if (mode === 'video') video?.onTick();
   dist = pos;                                     // (the video screen may have switched clips)
   if (!moving) { render(); return; }
 
   S.power.push(indoorMode() ? power : null);
+  const pNow = indoorMode() ? power : outPower.p3 ?? 0;
+  S.pEst.push(Math.round(pNow)); S.work.push((last(S.work) ?? 0) + pNow);
   S.cad.push(indoorMode() ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null); S.alt.push(fix && fix.alt != null ? fix.alt : null);
-  if (fix) trail.push(area.xy(fix.lat, fix.lon));
-  if (S.wall.length % 30 === 0) saveRide(S, mode);          // kept on the phone as you ride
+  if (fix) { trail.push(area.xy(fix.lat, fix.lon)); if (matcher) refTrail.push(matcher.toXY(fix.lat, fix.lon)); }
+  if (S.wall.length % 10 === 0) saveRide(S, mode, rideState());   // kept on the phone as you ride
   const t = clock.seconds;
   if (ref) {
     const refSec = t - offset;
@@ -157,11 +185,67 @@ function tick() {
     S.gapS.push(ref.timeAt(Math.min(dist, ref.total)) - refSec);   // + = ahead
     S.refPower.push(ref.hasPower ? ref.at('p', Math.min(dist, ref.total)) : null);
     S.refHr.push(ref.at('hr', Math.min(dist, ref.total)) || null);
-    if (dist >= ref.total) { finished = { gapS: ref.totalTime - refSec }; saveRide(S, mode); }
+    if (dist >= ref.total) { finished = { gapS: ref.totalTime - refSec }; saveRide(S, mode, rideState()); }
   } else {
     for (const k of ['refDist', 'gapM', 'gapS', 'refPower', 'refHr']) S[k].push(null);
   }
   if (indoorMode()) steps.update(S.power, S.hr);
+  render();
+}
+
+// You stopped (red light): when you're back up to speed, the gap goes back to
+// what it was before you started slowing down.
+function stopWatch(moving, speed, dist) {
+  const n = S.speed.length;
+  if (!moving && wasMoving && !stopEp && n > 25) {
+    const prior = S.speed.slice(Math.max(0, n - 40), n - 15).filter(v => v != null).sort((a, b) => a - b);
+    const cruise = prior[prior.length >> 1] || 0;
+    let j = n - 1;
+    while (j > Math.max(0, n - 60) && S.speed[j] < 0.85 * cruise) j--;
+    if (cruise > 2 && S.gapS[j] != null) stopEp = { gap: S.gapS[j], cruise, since: null, d0: dist };
+  } else if (moving && stopEp) {
+    if (stopEp.since == null) { stopEp.since = clock.seconds; stopEp.d0 = dist; }
+    if (speed >= 0.85 * stopEp.cruise || clock.seconds - stopEp.since > 45 || dist - stopEp.d0 > 400) {
+      offset = stopEp.gap - ref.timeAt(Math.min(dist, ref.total)) + clock.seconds;
+      if (!quiet) banner(`Stop smoothed out: gap back to ${sign(stopEp.gap)} s`), setTimeout(() => banner(''), 5000);
+      stopEp = null;
+    }
+  }
+}
+
+function rideState() {
+  return { open: !finished, running, refName: ref ? ref.name : null, offset, odo, pos, indoorDist: indoor.dist,
+    clock: { seconds: clock.seconds, now: clock.now, lastMove: clock.lastMove },
+    matcher: matcher ? { dist: matcher.dist, idx: matcher.idx, offRoute: matcher.offRoute } : null };
+}
+
+function rebuildRefTrail() {
+  refTrail = [];
+  if (!matcher || !S) return;
+  for (let i = 0; i < S.lat.length; i++) if (S.lat[i] != null) refTrail.push(matcher.toXY(S.lat[i], S.lon[i]));
+}
+
+// After a reload (or Chrome closing in the pocket) carry on with the ride you were on.
+async function restoreRide() {
+  const r = (await listRides())[0];
+  if (!r || !r.state || !r.state.open || Date.now() - r.end > 3 * 3600e3) return;
+  const st = r.state;
+  if (r.mode !== mode) setMode(r.mode);
+  const i = st.refName ? refs.findIndex(x => x.name === st.refName) : -1;
+  if ((ref ? ref.name : null) !== st.refName) selectRef(i);
+  newRide();
+  const n = r.S.wall.length;
+  for (const k of Object.keys(S)) S[k] = r.S[k] && r.S[k].length === n ? r.S[k] : new Array(n).fill(null);
+  if (!r.S.work) { let w = 0; S.work = S.pEst.map(p => (w += p || 0)); }
+  Object.assign(clock, st.clock); offset = st.offset; odo = st.odo; pos = st.pos; indoor.dist = st.indoorDist ?? pos;
+  if (matcher && st.matcher) Object.assign(matcher, st.matcher);
+  trail = []; lastFix = null;
+  for (let j = 0; j < n; j++) if (S.lat[j] != null) { trail.push(area.xy(S.lat[j], S.lon[j])); lastFix = { lat: S.lat[j], lon: S.lon[j] }; }
+  rebuildRefTrail();
+  running = !!st.running;
+  if (r.mode === 'ghost' && !links.gps) toggleGps();            // GPS needs no tap; the HR strap does (Bluetooth rule)
+  banner(`Carrying on with your ride from ${new Date(r.start).toLocaleTimeString([], { timeStyle: 'short' })}. (☰ → New ride to start a fresh one.)`);
+  setTimeout(() => banner(''), 8000);
   render();
 }
 
@@ -321,6 +405,15 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   $('gHr').textContent = hr ?? (links.hr && live.contact === false ? 'no contact' : '–');
   const rh = last(S.refHr);
   $('gHrRef').textContent = rh ? `ghost ${Math.round(rh)}` + (hr ? ` (${sign(hr - rh)})` : '') : '';
+  const p3 = indoorMode() ? avgLast(S.power, 3) : outPower && running ? outPower.p3 : null;
+  $('gPow').textContent = p3 != null ? Math.round(p3) : '–';
+  $('gPowRef').textContent = ref && ref.hasPower && you != null ? `ghost ${Math.round(ref.at('p', Math.min(you, ref.total)))}` : '';
+  if (ref && refWork && you != null && ghost != null && running) {
+    const wAt = d => interpW(Math.min(d, ref.total));
+    const gapK = (wAt(you) - wAt(ghost)) / 1000;            // + = ahead: work the ghost still has to do to get to you
+    const used = ((last(S.work) ?? 0) - wAt(you)) / 1000;     // + = you've used more than the original to get here
+    $('gWork').textContent = `work ${sign1(gapK)} kJ · used ${sign1(used)} kJ`;
+  } else $('gWork').textContent = '';
   const sp = last(S.speed);
   $('gSpeedLabel').textContent = free ? 'Average km/h' : 'Speed km/h';
   $('gSpeed').textContent = free ? (t > 0 ? ((last(S.dist) ?? 0) / t * 3.6).toFixed(1) : '–') : sp != null && running ? (sp * 3.6).toFixed(1) : '–';
@@ -344,16 +437,23 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
       anchor: riding ? 0.64 : 0.72, labelZone: riding ? [0.3, 0.7] : null, note: links.gps ? '' : 'Tap GPS to see where you are' });
     return;
   }
-  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets,
+  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets, trail: refTrail,
     anchor: riding ? 0.64 : 0.78, labelZone: riding ? [0.3, 0.7] : null });
 }
 
 // ------------------------------------------------------------------ actions
 
+function interpW(d) {
+  const st = ref.prof.step, i = Math.max(0, Math.min(refWork.length - 2, Math.floor(d / st)));
+  const f = Math.max(0, Math.min(1, (d - ref.prof.d[i]) / st));
+  return refWork[i] + (refWork[i + 1] - refWork[i]) * f;
+}
+function sign1(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
+
 function toggleStart() {
   if (finished) return;
   running = !running;
-  if (!running) saveRide(S, mode);
+  if (!running) saveRide(S, mode, rideState());
   render();
 }
 
@@ -466,6 +566,27 @@ function fillRefList() {
   sel.value = String(Math.max(-1, Math.min(refs.length - 1, store.get('refIndex', 0))));
 }
 
+// Stretches ridden back and forth in the current reference: show each on a
+// small map and cut it out (or keep it) when you say so.
+function showTurnBacks() {
+  const box = $('refTurns'); box.innerHTML = '';
+  const i = +$('refList').value, r = refs[i];
+  if (!r || !r.prof.x) return;
+  for (const tb of findTurnBacks(r.prof)) {
+    if ((r.prof.kept || []).includes(tb.d0)) continue;
+    const div = document.createElement('div'); div.className = 'turnback';
+    div.innerHTML = `<b>Back and forth at ${(tb.d0 / 1000).toFixed(2)} km</b>: the ride turns around, goes ${tb.back} m back and turns again (${Math.round(tb.d1 - tb.d0)} m in all, red on the map). Cut it out so the ghost rides straight through?`;
+    const cv = document.createElement('canvas'); cv.className = 'tbmap'; div.appendChild(cv);
+    const row = document.createElement('div'); row.className = 'row';
+    const cut = document.createElement('button'); cut.className = 'primary'; cut.textContent = 'Cut it out';
+    cut.onclick = () => { r.prof = cutTurnBack(r.prof, tb); store.set('refs', refs); selectRef(i); };
+    const keep = document.createElement('button'); keep.textContent = 'Keep it';
+    keep.onclick = () => { r.prof.kept = [...(r.prof.kept || []), tb.d0]; store.set('refs', refs); showTurnBacks(); banner(''); };
+    row.append(keep, cut); div.appendChild(row); box.appendChild(div);
+    requestAnimationFrame(() => D.drawTurnBack(cv, r.prof, tb));
+  }
+}
+
 function showRefInfo(extra = '') {
   const el = $('refInfo');
   if (!ref) { el.textContent = extra; return; }
@@ -473,7 +594,8 @@ function showRefInfo(extra = '') {
   const pw = ref.hasPower ? Math.round(P.p.reduce((a, b) => a + b, 0) / P.p.length) : null;
   el.innerHTML = `<b>${ref.name}</b>: ${(ref.total / 1000).toFixed(2)} km, ${fmtTime(ref.totalTime)} moving` +
     (pw != null ? `, average ${pw} W${P.powerEstimated ? ' (estimated)' : ''}` : ', no power') +
-    (ref.hasRoute ? '' : ', <span class="err">no GPS route</span>') + (streetsNote ? `<br>${streetsNote}` : '') + (extra ? `<br>${extra}` : '');
+    (ref.hasRoute ? '' : ', <span class="err">no GPS route</span>') + (refNote ? `<br>${refNote}` : '') + (streetsNote ? `<br>${streetsNote}` : '') + (extra ? `<br>${extra}` : '');
+  showTurnBacks();
 }
 
 async function loadRefFile(file) {
@@ -614,11 +736,10 @@ $('btnStart').onclick = $('gStart').onclick = toggleStart;
 $('btnResync').onclick = $('gResync').onclick = resync;
 $('mCsv').onclick = saveCsv;
 $('btnFit').onclick = $('mFit').onclick = saveFit;
-$('btnRef').onclick = () => { fillRefList(); $('riderKg').value = rider.riderKg; showRefInfo(); $('dlgRef').showModal(); };
+$('btnRef').onclick = () => { fillRefList(); showRefInfo(); $('dlgRef').showModal(); };
 $('refClose').onclick = () => $('dlgRef').close();
 $('refList').onchange = e => selectRef(+e.target.value);
 $('refFile').onchange = e => e.target.files[0] && loadRefFile(e.target.files[0]);
-$('riderKg').onchange = e => { const v = parseFloat(e.target.value); if (v > 30 && v < 150) { rider.riderKg = v; store.set('riderKg', v); indoor = Object.assign(new IndoorRide(rider), { dist: indoor.dist, speed: indoor.speed }); } };
 $('refStreets').onclick = () => getStreets();
 $('refDelete').onclick = () => {
   const i = +$('refList').value;
@@ -626,6 +747,38 @@ $('refDelete').onclick = () => {
   deleteStreets(refs[i].name);
   refs.splice(i, 1); store.set('refs', refs); fillRefList(); selectRef(refs.length ? 0 : -1);
 };
+$('mSettings').onclick = () => {
+  $('dlgMenu').close();
+  $('setRider').value = rider.riderKg; $('setBike').value = rider.bikeKg; $('setCda').value = rider.cda; $('setCrr').value = rider.crr;
+  $('setIron').checked = settings.ironStops; $('setLive').checked = settings.liveStops; $('keyTest').textContent = 'Press the button now…';
+  $('dlgSettings').showModal();
+};
+$('setClose').onclick = () => {
+  const num = (id, lo, hi, d) => { const v = parseFloat($(id).value); return v >= lo && v <= hi ? v : d; };
+  rider.riderKg = num('setRider', 30, 150, rider.riderKg); rider.bikeKg = num('setBike', 3, 40, rider.bikeKg);
+  rider.cda = num('setCda', 0.15, 0.8, rider.cda); rider.crr = num('setCrr', 0.001, 0.03, rider.crr);
+  store.set('rider', { riderKg: rider.riderKg, bikeKg: rider.bikeKg, cda: rider.cda, crr: rider.crr }); store.set('riderKg', rider.riderKg);
+  const iron = $('setIron').checked !== settings.ironStops;
+  settings.ironStops = $('setIron').checked; settings.liveStops = $('setLive').checked; store.set('settings', settings);
+  outPower = new OutdoorPower(rider);
+  indoor = Object.assign(new IndoorRide(rider), { dist: indoor.dist, speed: indoor.speed });
+  if (iron && ref) { const i = refs.findIndex(x => x.name === ref.name); if (i >= 0) selectRef(i); }
+  $('dlgSettings').close();
+};
+// Reset gap without the touch screen: volume key (if Chrome passes it on), a
+// Bluetooth remote / keyboard (Enter, space, Page Down, arrows) or headset button.
+const RESET_KEYS = ['AudioVolumeUp', 'VolumeUp', 'AudioVolumeDown', 'VolumeDown', 'Enter', ' ', 'PageDown', 'PageUp', 'ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'MediaTrackNext', 'MediaTrackPrevious', 'MediaPlayPause', 'Camera'];
+window.addEventListener('keydown', e => {
+  if ($('dlgSettings').open) { $('keyTest').textContent = `Got "${e.key}"` + (RESET_KEYS.includes(e.key) ? ' — this button resets the gap.' : ' — not used.'); e.preventDefault(); return; }
+  if (e.target.closest('input, select, textarea') || document.querySelector('dialog[open]')) return;
+  if (mode === 'ghost' && RESET_KEYS.includes(e.key)) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
+});
+if ('mediaSession' in navigator) for (const a of ['nexttrack', 'previoustrack', 'play', 'pause']) {
+  try { navigator.mediaSession.setActionHandler(a, () => { if (mode === 'ghost') { resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); } }); } catch (e) { /* */ }
+}
+const saveNow = () => { if (S && S.wall.length) saveRide(S, mode, rideState()); };
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+window.addEventListener('pagehide', saveNow);
 $('btnMenu').onclick = () => { $('appVersion').textContent = 'Version ' + APP_VERSION; $('dlgMenu').showModal(); };
 $('menuClose').onclick = () => $('dlgMenu').close();
 $('mTrainer').onclick = () => { setMode('trainer'); $('dlgMenu').close(); };
@@ -665,10 +818,11 @@ video = initVideoScreen({
 });
 newRide();
 if (refs.length && store.get('refIndex', 0) >= 0) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));
+restoreRide();
 if (!bluetoothAvailable()) banner(window.isSecureContext ? 'This browser has no Web Bluetooth — use Chrome on Android, Mac or Windows.' : 'Open this page over https:// so Bluetooth and GPS can work.');
 keepScreenOn();
 setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video, area, trail }; }, showRides, getArea, selectRef, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video, area, trail, refTrail, offset, outPower, settings, refs }; }, resync, restoreRide, newRide, showRides, getArea, selectRef, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };

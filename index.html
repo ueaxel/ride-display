@@ -75,15 +75,22 @@
   .gapbig { font-size:min(26vw, 13dvh); font-weight:800; line-height:1; font-variant-numeric: tabular-nums; }
   .gapbig .unit { font-size:.35em; }
   .gapsec { font-size:min(8vw, 4dvh); font-weight:600; color:var(--ghost); font-variant-numeric: tabular-nums; }
+  .gapwork { font-size:min(5vw, 2.6dvh); color:var(--muted); font-variant-numeric: tabular-nums; min-height:1em; }
+  .turnback { border:1px solid var(--line); border-radius:10px; padding:8px; margin:8px 0; }
+  .tbmap { width:100%; height:160px; display:block; margin-top:6px; }
+  .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .setgrid input { width:100%; }
+  label.check { display:flex; gap:8px; align-items:flex-start; margin:8px 0; }
   #gauge { height:30px; margin:6px 14px 0; width:auto; }
   .gaugelab { display:flex; justify-content:space-between; margin:0 14px; color:var(--muted); font-size:12px; }
   #gmapWrap { flex:1; min-height:60px; position:relative; margin:6px 10px; border-radius:14px; overflow:hidden; background:#0E141B; border:1px solid var(--line); }
   .zoom { position:absolute; right:8px; top:8px; display:flex; flex-direction:column; gap:6px; }
   .zoom button { width:44px; height:44px; padding:0; font-size:22px; }
   .offroute { position:absolute; left:8px; top:8px; background:var(--red); color:#fff; border-radius:8px; padding:4px 8px; font-size:13px; display:none; }
-  .gnums { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:6px; padding:0 10px; }
-  .gnum { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 10px; }
-  .gnum .v { font-size:min(11vw, 5.5dvh); font-weight:700; line-height:1.05; font-variant-numeric: tabular-nums; }
+  .gnums { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; padding:0 10px; }
+  .gnum { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 8px; }
+  .gnum .label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gnum .v { font-size:min(10vw, 5.5dvh); font-weight:700; line-height:1.05; font-variant-numeric: tabular-nums; }
   .gnum .r { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:min(5.5vw, 2.8dvh); color:var(--ghost); font-variant-numeric: tabular-nums; }
   .gfoot { display:flex; gap:8px; padding:8px 10px max(10px, env(safe-area-inset-bottom)); flex:none; }
   .gfoot button { flex:1; padding:12px 6px; font-size:16px; }
@@ -239,6 +246,7 @@
   <div class="gapbox">
     <div class="gapbig" id="gGap">–</div>
     <div class="gapsec" id="gGapS">load a reference ride</div>
+    <div class="gapwork" id="gWork"></div>
   </div>
   <canvas id="gauge"></canvas>
   <div class="gaugelab"><span>◀ behind</span><span>ahead ▶</span></div>
@@ -249,6 +257,7 @@
   <div class="gnums">
     <div class="gnum"><div class="label">Heart rate</div><div class="v" id="gHr">–</div><div class="r" id="gHrRef"></div></div>
     <div class="gnum"><div class="label" id="gSpeedLabel">Speed km/h</div><div class="v" id="gSpeed">–</div><div class="r" id="gSpeedRef"></div></div>
+    <div class="gnum"><div class="label">Power 3 s W</div><div class="v" id="gPow">–</div><div class="r" id="gPowRef"></div></div>
   </div>
   <div class="gline"><span id="gTime">0:00</span><span id="gDist">0.00 km</span><span id="gLeft"></span></div>
   <div class="gfoot">
@@ -312,6 +321,22 @@
   <div class="row"><button id="vClipsClose" class="primary">Close</button></div>
 </dialog>
 
+<dialog id="dlgSettings">
+  <h2 style="margin-top:0">Settings</h2>
+  <p>Rider and bike: for the power estimate on the phone (from speed, acceleration and slope), for reference rides without a power meter, and for the speed on the trainer.</p>
+  <div class="setgrid">
+    <label>Rider, kg <input type="number" id="setRider" step="0.1" min="30" max="150"></label>
+    <label>Bike, kg <input type="number" id="setBike" step="0.1" min="3" max="40"></label>
+    <label>CdA, m² <input type="number" id="setCda" step="0.01" min="0.15" max="0.8"></label>
+    <label>Crr <input type="number" id="setCrr" step="0.0005" min="0.001" max="0.03"></label>
+  </div>
+  <p class="muted">CdA 0.32 is riding on the hoods, about 0.28 in the drops. Crr 0.0055 is good road tyres; 0.008 rough roads.</p>
+  <label class="check"><input type="checkbox" id="setIron"> Smooth out stops in the reference (the ghost doesn't brake for its old red lights)</label>
+  <label class="check"><input type="checkbox" id="setLive"> When you stop, put the gap back once you're up to speed again</label>
+  <p><b>Button test</b> (Reset gap without touching the screen): press the phone's volume button, or a Bluetooth remote. <span id="keyTest"></span></p>
+  <div class="row"><button id="setClose" class="primary">Done</button></div>
+</dialog>
+
 <dialog id="dlgRides">
   <h2 style="margin-top:0">My rides</h2>
   <p>Every ride is kept on this device while you ride (the last 30). <b>Save FIT</b> puts it in Downloads, for Garmin Connect (website → Import Data) or Strava. <b>Use as reference</b> lets you race it next time.</p>
@@ -343,9 +368,8 @@
   <input type="file" id="refFile" accept=".fit,.zip,application/octet-stream,application/zip">
   <label>Use the ride only up to … km (optional, e.g. to skip a long descent)</label>
   <input type="number" id="refUntil" step="0.01" min="0" placeholder="whole ride">
-  <label>Rider weight, kg (power estimate and indoor speed)</label>
-  <input type="number" id="riderKg" step="0.1" min="30" max="150">
   <p id="refInfo"></p>
+  <div id="refTurns"></div>
   <div class="row">
     <button id="refStreets">Download streets</button>
     <button id="refDelete">Delete this reference</button>
@@ -370,6 +394,7 @@
   <div class="row" style="justify-content:flex-start">
     <button id="mRides">My rides</button>
     <button id="mArea">Download map around me</button>
+    <button id="mSettings">Settings</button>
   </div>
   <div class="row" style="justify-content:flex-start">
     <button id="mAllTrainer">Trainer not listed? Show all devices</button>
@@ -377,7 +402,7 @@
   </div>
   <p>Tablet: connect the <b>HR strap</b> and the <b>trainer</b> (both over Bluetooth; the watch keeps the trainer on ANT+), press <b>Start</b> as you start the watch.<br>
   Phone: connect the <b>HR strap</b> and <b>GPS</b>, press <b>Start</b> at the spot where the original ride started.<br>
-  <b>Reset gap</b> lines the ghost up with you again (after a red light or a stop), like the Lap button on the watch.</p>
+  <b>Reset gap</b> lines the ghost up with you again, like the Lap button on the watch; with gloves, use a button (see Settings → Button test).</p>
   <div class="row"><span class="muted" id="appVersion" style="margin-right:auto"></span><button id="menuClose" class="primary">Close</button></div>
 </dialog>
 
