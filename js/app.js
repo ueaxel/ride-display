@@ -506,7 +506,13 @@ $('mGhost').onclick = () => { setMode('ghost'); $('dlgMenu').close(); };
 $('mVideo').onclick = () => { setMode('video'); $('dlgMenu').close(); };
 $('mDemo').onclick = () => { toggleDemo(); $('dlgMenu').close(); };
 $('mNew').onclick = () => { newRide(); $('dlgMenu').close(); };
-$('mFull').onclick = () => { document.documentElement.requestFullscreen?.().catch(() => {}); $('dlgMenu').close(); };
+const toggleFull = () => {
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  else document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => {});
+};
+$('mFull').onclick = () => { toggleFull(); $('dlgMenu').close(); };
+$('btnFull').onclick = toggleFull;
+window.addEventListener('keydown', e => { if ((e.key === 'f' || e.key === 'F') && !e.target.closest('input, select, textarea')) toggleFull(); });
 $('btnMapView').onclick = e => { mapView = mapView === 'all' ? 'follow' : 'all'; e.target.textContent = mapView === 'all' ? 'Follow' : 'Whole route'; render(); };
 $('btnAvg').onclick = e => { avgWin = avgWin === 10 ? 30 : avgWin === 30 ? 1 : 10; e.target.textContent = `${avgWin} s`; render(); };
 $('btnWin').onclick = e => { traceWin = traceWin === 600 ? 1800 : traceWin === 1800 ? 0 : 600; e.target.textContent = traceWin ? `${traceWin / 60} min` : 'whole'; render(); };

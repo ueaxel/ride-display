@@ -52,7 +52,7 @@ export class ClipNet {
     const [x, y] = this.pointAt(k, d), h = this.heading(k, d);
     const out = [];
     this.g.forEach((g, j) => {
-      if (j === k || !g) return;
+      if (j === k || !g || this.clips[j].ref === this.clips[k].ref) return;   // chapters of one ride
       const m = this.nearest(j, x, y);
       if (!m || m.off > NEAR) return;
       if (Math.abs(angle(this.heading(j, m.dist) - h)) > Math.PI / 4) return;

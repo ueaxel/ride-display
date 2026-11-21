@@ -7,13 +7,14 @@ in vec2 p; out vec2 v; void main() { v = p; gl_Position = vec4(p, 0.0, 1.0); }`;
 const FS = `#version 300 es
 precision highp float;
 in vec2 v; out vec4 color;
-uniform sampler2D tex; uniform float yaw, pitch, tanHalf, aspect;
+uniform sampler2D tex; uniform float yaw, pitch, tanHalf, aspect; uniform mat3 level;
 void main() {
   vec3 d = normalize(vec3(v.x * tanHalf * aspect, v.y * tanHalf, -1.0));
   float cp = cos(pitch), sp = sin(pitch);
   d = vec3(d.x, d.y * cp - d.z * sp, d.y * sp + d.z * cp);          // look up/down
   float cy = cos(yaw), sy = sin(yaw);
   d = vec3(d.x * cy - d.z * sy, d.y, d.x * sy + d.z * cy);          // look left/right
+  d = level * d;                                                    // horizon correction (roll / tilt)
   float lon = atan(d.x, -d.z), lat = asin(clamp(d.y, -1.0, 1.0));
   vec2 uv = vec2(fract(lon / 6.2831853 + 0.5), 0.5 - lat / 3.1415927);
   color = texture(tex, uv);
@@ -30,6 +31,7 @@ export class VideoView {
     container.append(this.video, this.canvas);
     this.yaw = 0; this.pitch = -0.08; this.fov = 80;
     this.extraYaw = 0;                       // added turn (world-locked videos follow the road)
+    this.roll = 0; this.tilt = 0; this.forwardYaw = 0;   // horizon correction, about the riding direction
     this.is360 = false;
     this.gl = null;
     this.ready = false;
@@ -66,6 +68,20 @@ export class VideoView {
   }
   // forward: the yaw that looks along the road for this video (camera may face backwards)
   resetView(forward = 0) { this.yaw = forward; this.pitch = -0.08; this.fov = 80; this.onViewChange?.(); }
+  // Rotation that levels the picture: roll about the riding direction, tilt
+  // about the sideways axis (column-major mat3 for WebGL).
+  levelMatrix() {
+    const rot = (ax, a) => {
+      const [x, y, z] = ax, c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+      return [[t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+        [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+        [t * x * z - s * y, t * y * z + s * x, t * z * z + c]];
+    };
+    const f = this.forwardYaw;
+    const A = rot([Math.sin(f), 0, -Math.cos(f)], this.roll), B = rot([Math.cos(f), 0, Math.sin(f)], this.tilt);
+    const M = [0, 1, 2].map(i => [0, 1, 2].map(j => A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]));
+    return new Float32Array([M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
+  }
   initGl() {
     const gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
     if (!gl) { this.glFailed = true; return; }
@@ -80,7 +96,7 @@ export class VideoView {
     this.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.u = Object.fromEntries(['yaw', 'pitch', 'tanHalf', 'aspect'].map(n => [n, gl.getUniformLocation(prog, n)]));
+    this.u = Object.fromEntries(['yaw', 'pitch', 'tanHalf', 'aspect', 'level'].map(n => [n, gl.getUniformLocation(prog, n)]));
     this.gl = gl;
   }
   loop() {
@@ -98,6 +114,7 @@ export class VideoView {
     if (this.dirty || this.noVfc) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, this.video); this.dirty = false; }
     gl.uniform1f(this.u.yaw, this.yaw + this.extraYaw); gl.uniform1f(this.u.pitch, this.pitch);
     gl.uniform1f(this.u.tanHalf, Math.tan(this.fov * Math.PI / 360)); gl.uniform1f(this.u.aspect, w / h);
+    gl.uniformMatrix3fv(this.u.level, false, this.levelMatrix());
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

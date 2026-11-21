@@ -91,7 +91,7 @@
   #videoScreen { display:none; position:fixed; inset:0; background:#000; overflow:hidden; }
   body[data-mode=video] #videoScreen { display:block; }
   body[data-mode=video] header { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(11,15,20,.8); transition: opacity .4s; flex-wrap:nowrap; overflow-x:auto; }
-  body[data-mode=video] #btnCsv, body[data-mode=video] .title { display:none; }
+  body[data-mode=video] #btnCsv, body[data-mode=video] #btnFit, body[data-mode=video] .title { display:none; }
   body[data-mode=video] .banner { position:fixed; top:58px; left:0; right:0; z-index:19; }
   body.chromeless header, body.chromeless .banner { opacity:0; pointer-events:none; }
   body.chromeless { cursor:none; }
@@ -114,6 +114,10 @@
   .vnums .label { font-size:10px; }
   .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
   .vnums .s { font-size:12px; color:var(--ghost); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .levelbox { display:none; position:absolute; z-index:14; right:2%; top:12%; width:320px; flex-direction:column; gap:8px; padding:12px;
+    background:rgba(11,15,20,.85); border:1px solid var(--accent); border-radius:14px; font-size:14px; }
+  .levelbox label { display:flex; flex-direction:column; gap:4px; color:var(--muted); }
+  .levelbox .row { display:flex; gap:6px; }
   .mapinfo { position:absolute; left:10px; right:10px; top:2px; font-size:12px; color:var(--text); text-shadow:0 1px 3px #000; font-variant-numeric:tabular-nums; pointer-events:none; }
   .junction { position:absolute; left:50%; bottom:5%; transform:translateX(-50%); z-index:12; display:none; flex-direction:column; gap:8px;
     background:rgba(11,15,20,.75); border:1px solid var(--accent); border-radius:16px; padding:12px 16px; min-width:320px; }
@@ -158,14 +162,13 @@
   </select>
   <button id="btnClips" class="vonly">Clips</button>
   <button id="btnPanels" class="vonly">Panels</button>
-  <button id="btnLook" class="vonly" title="Look straight ahead again">Look ahead</button>
-  <button id="btnForward" class="vonly" title="Save the current view as 'forward' for this video">Set forward</button>
-  <button id="btnTurn" class="vonly">Turn with road</button>
+  <button id="btnLevel" class="vonly" title="Look ahead, set forward, level the horizon">View</button>
   <span class="spacer"></span>
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
   <button id="btnFit" class="wide">Save FIT</button>
   <button id="btnCsv" class="wide">Save CSV</button>
+  <button id="btnFull" title="Full screen (key F)">⛶</button>
   <button id="btnMenu">☰</button>
 </header>
 <div class="banner" id="banner"></div>
@@ -244,6 +247,16 @@
   <section class="float" data-panel="trace"><div class="fhead">Power &amp; heart rate<button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vTrace"></canvas></div><div class="grip"></div></section>
   <div class="junction" id="vJunction"></div>
+  <div id="vLevel" class="levelbox">
+    <b>View</b> <span class="muted">— saved for this ride. Drag the video to look around, scroll to zoom.</span>
+    <div class="row" style="flex-wrap:wrap"><button id="btnLook" title="Look straight ahead again">Look ahead</button>
+      <button id="btnForward" title="Save the current view as 'forward' for this ride">Set forward</button>
+      <button id="btnTurn">Turn with road</button></div>
+    <b style="margin-top:4px">Level the horizon</b>
+    <label>Roll (tilted left/right) <span id="lvRollV"></span><input type="range" id="lvRoll" min="-25" max="25" step="0.5" value="0"></label>
+    <label>Tilt (nose up/down) <span id="lvTiltV"></span><input type="range" id="lvTilt" min="-25" max="25" step="0.5" value="0"></label>
+    <div class="row" style="justify-content:flex-end"><button id="lvReset">Reset</button><button id="lvClose" class="primary">Close</button></div>
+  </div>
   <div id="vSync">
     <div><b>Sync video and route</b> <span class="muted" id="vSyncHint">Scrub the video to the moment you pressed start on the watch and tap <b>Ride starts here</b>. Or scrub to a spot you can recognise (a crossing, a turn) and click that spot on the map.</span></div>
     <div class="row"><button id="vSyncBack10">−10 s</button><button id="vSyncBack1">−1 s</button><button id="vSyncPlay">▶︎ / ❚❚</button>

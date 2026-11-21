@@ -1,0 +1,24 @@
+// node Display/tests/check_chapters.mjs DIR — GoPro chapters (GS01xxxx + GS02xxxx) of one ride.
+import { readFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { buildClips, linkChapters } from '../js/clips.js';
+import { ClipNet } from '../js/junctions.js';
+const dir = process.argv[2];
+let fails = 0;
+const check = (n, ok, i = '') => { if (!ok) fails++; console.log(ok ? 'ok  ' : 'FAIL', n, i); };
+const files = readdirSync(dir).map(n => new File([readFileSync(join(dir, n))], n));
+const { clips } = await buildClips(files, new Map());
+const a = clips.filter(c => c.fitName === 'RideA.fit');
+check('both chapters paired with ride A', a.length === 2, clips.map(c => c.name + '<-' + c.fitName).join(', '));
+const [c1, c2] = a;
+check('chapters share one route', c1.ref === c2.ref && c1.chapters.length === 2);
+check('chapter 2 starts where chapter 1 ends', Math.abs(c2.v0 - (c1.v0 + c1.duration)) < 0.01, `${c1.v0} + ${c1.duration} -> ${c2.v0}`);
+const p = c1.distAtVideo(c1.duration - 1), q = c2.distAtVideo(1);
+check('route positions continue across the cut', q > p && q - p < 30, `${p.toFixed(0)} m -> ${q.toFixed(0)} m`);
+check('chapter 1 covers early part, chapter 2 the late part', c1.covers(300) && !c2.covers(300) && c2.covers(1800) && !c1.covers(1800));
+c2.v0 += 4; c2.synced = true; linkChapters(clips, c2);
+check('syncing chapter 2 moves chapter 1 too', Math.abs(c1.v0 - (c2.v0 - c1.duration)) < 0.01 && c1.synced, `${c1.v0}`);
+const net = new ClipNet(clips);
+const i1 = clips.indexOf(c1);
+check('no junction between chapters of one ride', net.ahead(i1, 1300).every(ch => clips[ch.clip].fitName !== 'RideA.fit'), JSON.stringify(net.ahead(i1, 1300).map(x => clips[x.clip].name)));
+process.exit(fails ? 1 : 0);

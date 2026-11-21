@@ -4,7 +4,7 @@
 // them relative to the screen, whatever the video does.
 import { VideoView, VideoFollower } from './view360.js';
 import { ClipNet } from './junctions.js';
-import { buildClips, pairByHand, loadClips, saveClip, deleteClip, filesInFolder, folderPickerAvailable, saveMisc, loadMisc } from './clips.js';
+import { buildClips, pairByHand, linkChapters, loadClips, saveClip, deleteClip, filesInFolder, folderPickerAvailable, saveMisc, loadMisc } from './clips.js';
 import { downloadStreets, saveStreets, loadStreets } from './streets.js';
 import * as D from './draw.js';
 
@@ -71,17 +71,35 @@ export function initVideoScreen(api) {
   $('btnPanels').onclick = () => { fillPanelMenu(); $('dlgPanels').showModal(); };
   $('vPanelsClose').onclick = () => $('dlgPanels').close();
   $('btnLook').onclick = () => view.resetView(clips[cur]?.forward || 0);
+  // horizon correction, per ride (all chapters)
+  function updateLevel() {
+    $('lvRoll').value = Math.round(view.roll * 1800 / Math.PI) / 10; $('lvTilt').value = Math.round(view.tilt * 1800 / Math.PI) / 10;
+    $('lvRollV').textContent = `${(+$('lvRoll').value).toFixed(1)}°`; $('lvTiltV').textContent = `${(+$('lvTilt').value).toFixed(1)}°`;
+  }
+  async function saveLevel() {
+    const c = clips[cur]; if (!c) return;
+    for (const m of c.chapters || [c]) { m.roll = view.roll; m.tilt = view.tilt; await saveClip(m); }
+  }
+  $('btnLevel').onclick = () => { const b = $('vLevel'); b.style.display = b.style.display === 'flex' ? 'none' : 'flex'; updateLevel(); };
+  $('lvRoll').oninput = e => { view.roll = +e.target.value * Math.PI / 180; updateLevel(); };
+  $('lvTilt').oninput = e => { view.tilt = +e.target.value * Math.PI / 180; updateLevel(); };
+  $('lvRoll').onchange = $('lvTilt').onchange = saveLevel;
+  $('lvReset').onclick = () => { view.roll = 0; view.tilt = 0; updateLevel(); saveLevel(); };
+  $('lvClose').onclick = () => { $('vLevel').style.display = 'none'; };
   $('btnForward').onclick = async () => {
     const c = clips[cur];
     if (!c) return;
-    c.forward = view.yaw; await saveClip(c);
+    for (const m of c.chapters || [c]) { m.forward = view.yaw; await saveClip(m); }
+    view.forwardYaw = view.yaw;
     api.banner(`Forward for ${c.label} saved: Look ahead now returns to this view.`);
     setTimeout(() => api.banner(''), 3000);
   };
   $('btnTurn').onclick = async () => {
     const c = clips[cur];
     if (!c) return;
-    c.worldLock = !c.worldLock; await saveClip(c); updateTurnBtn();
+    const on = !c.worldLock;
+    for (const m of c.chapters || [c]) { m.worldLock = on; await saveClip(m); }
+    updateTurnBtn();
   };
   function updateTurnBtn() {
     const c = clips[cur], b = $('btnTurn');
@@ -133,7 +151,7 @@ export function initVideoScreen(api) {
         if (sel.value === '') return;
         const clip = await pairByHand(u.file, u.info, rideChoices[+sel.value]);
         unmatched = unmatched.filter(x => x !== u);
-        clips.push(clip); net = new ClipNet(clips);
+        clips.push(clip); linkChapters(clips); net = new ClipNet(clips);
         fillClipList();
         $('vClipNotes').textContent = `Paired ${clip.label} — now tap Sync to line it up with the route.`;
       };
@@ -181,11 +199,16 @@ export function initVideoScreen(api) {
     } catch (e) { $('vClipNotes').textContent = e.message; }
   };
 
+  function applyClipView(c) { view.forwardYaw = c.forward || 0; view.roll = c.roll || 0; view.tilt = c.tilt || 0; updateLevel(); }
   function startClip(i, p) {
+    // a chaptered ride: start with the chapter that covers the start point
+    const g = clips[i].chapters || [clips[i]];
+    const pick = g.find(m => m.covers(p)) || clips[i];
+    i = clips.indexOf(pick);
     cur = i; setTimeout(updateTurnBtn);
     const c = clips[i];
     view.load(c.url);
-    view.resetView(c.forward || 0);
+    view.resetView(c.forward || 0); applyClipView(c);
     api.switchRef(c.ref, p, 'clip:' + c.id);
     $('vMsg').textContent = '';
     choices = [];
@@ -217,11 +240,14 @@ export function initVideoScreen(api) {
   function takeTurn(ch) {
     const p = net.transfer(cur, api.pos, ch.clip);
     if (p == null) return;
+    ch = { ...ch };
     const lookOff = view.yaw - (clips[cur].forward || 0);      // keep where you were looking
-    cur = ch.clip; setTimeout(updateTurnBtn);
+    const g = clips[ch.clip].chapters || [clips[ch.clip]];
+    const cand = g.find(m => { const q = net.transfer(cur, api.pos, clips.indexOf(m)); return q != null && m.covers(q); }) || clips[ch.clip];
+    cur = clips.indexOf(cand); setTimeout(updateTurnBtn);
     const c = clips[cur];
     view.load(c.url);
-    view.yaw = (c.forward || 0) + lookOff;
+    view.yaw = (c.forward || 0) + lookOff; applyClipView(c);
     api.switchRef(c.ref, p, 'clip:' + c.id);
     choices = []; showJunction();
   }
@@ -276,7 +302,7 @@ export function initVideoScreen(api) {
   $('vSyncStart').onclick = async () => {
     const c = clips[syncClip];
     c.v0 = -view.video.currentTime; c.synced = true; syncChanged = true;
-    await saveClip(c);
+    await saveClip(c); linkChapters(clips, c);
     $('vSyncHint').textContent = `Saved: the ride starts at video ${fmtMin(view.video.currentTime)}. Check a spot later in the ride on the map, then Done.`;
     drawSync();
   };
@@ -294,7 +320,7 @@ export function initVideoScreen(api) {
     if (!best || best.dd > 40 ** 2) { $('vSyncHint').textContent = 'Click closer to the route.'; return; }
     c.v0 = c.ref.elapsedAt(best.d) - view.video.currentTime;
     c.synced = true; syncChanged = true;
-    await saveClip(c);
+    await saveClip(c); linkChapters(clips, c);
     $('vSyncHint').textContent = `Synced: video 0:00 = ride +${fmtMin(Math.max(0, c.v0))}. Check another spot to confirm, then Done.`;
     drawSync();
   });
@@ -320,6 +346,15 @@ export function initVideoScreen(api) {
     const c = clips[cur];
     if (!c || c.ref !== api.ref) return;
     const p = api.posNow();
+    // past the end (or before the start) of this chapter: switch to the chapter that has it
+    if (c.chapters && c.chapters.length > 1 && !c.covers(p)) {
+      const next = c.chapters.find(m => m !== c && m.covers(p));
+      if (next) {
+        const lookYaw = view.yaw;
+        cur = clips.indexOf(next); view.load(next.url); view.yaw = lookYaw; applyClipView(next);
+        return;
+      }
+    }
     const target = c.videoTime(p);
     // video seconds per metre here, times your speed
     const dvd = (c.videoTime(p + 5) - c.videoTime(p - 5)) / 10;

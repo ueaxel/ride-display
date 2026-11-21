@@ -62,8 +62,8 @@ export function guessV0(prof, info) {
 // ------------------------------------------------------------ clip objects
 
 export class Clip {
-  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0 }) {
-    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward });
+  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0, roll = 0, tilt = 0 }) {
+    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt });
     this.prof = prof;
     this.ref = new Reference(prof);
     this.file = null;          // the video File (picked each session)
@@ -73,6 +73,7 @@ export class Clip {
   // Second of video for a distance along the route (may be outside the video).
   videoTime(dist) { return this.ref.elapsedAt(dist) - this.v0; }
   distAtVideo(t) { return this.ref.distAtElapsed(t + this.v0); }
+  covers(dist) { const t = this.videoTime(dist); return t >= 0 && t <= (this.duration || Infinity); }
   // part of the route the video covers
   get videoRange() {
     const a = this.distAtVideo(0), b = this.duration ? this.distAtVideo(this.duration) : this.ref.total;
@@ -88,8 +89,8 @@ export class Clip {
     this.file = file; this.url = URL.createObjectURL(file);
   }
   toJSON() {
-    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, prof } = this;
-    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, prof };
+    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, prof } = this;
+    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, prof };
   }
 }
 
@@ -170,7 +171,8 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
     clip.setFile(v);
     out.push(clip);
   }
-  out.sort((a, b) => (a.prof.start || 0) - (b.prof.start || 0));
+  out.sort((a, b) => (a.prof.start || 0) - (b.prof.start || 0) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  linkChapters(out);
   return { clips: out, notes, unmatched, rides: profs.filter(r => r.prof.x) };
 }
 
@@ -182,6 +184,29 @@ export async function pairByHand(video, info, ride) {
   await saveClip(clip);
   clip.setFile(video);
   return clip;
+}
+
+// Videos of the same ride are chapters of one recording (GoPro splits at
+// 4 GB: GS01xxxx, GS02xxxx...), in file-name order. They share one route
+// object, and each chapter starts where the one before ended, so only one
+// of them needs syncing. `anchor` = the chapter whose sync is the truth.
+export function linkChapters(clips, anchor = null) {
+  const groups = new Map();
+  for (const c of clips) {
+    const k = c.fitName + '|' + (c.prof.start || '');
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  }
+  for (const g of groups.values()) {
+    g.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    g.forEach((c, i) => { c.chapter = i; c.chapters = g; c.ref = g[0].ref; });
+    if (g.length < 2) continue;
+    const a = g.includes(anchor) ? anchor : g.find(c => c.synced) || g[0];
+    let start = a.v0;
+    for (let i = g.indexOf(a) - 1; i >= 0; i--) start -= g[i].duration || 0;
+    for (const c of g) { if (c.v0 !== start || (a.synced && !c.synced)) { c.v0 = start; c.synced = a.synced; saveClip(c); } start += c.duration || 0; }
+  }
+  return clips;
 }
 
 // All files of a folder picked with showDirectoryPicker (Chrome on Mac/PC).
