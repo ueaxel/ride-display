@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '24 (21 Nov 2026, power, work gap, stops, turn-backs)';
+export const APP_VERSION = '25 (21 Nov 2026, downloads fixed, Share)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -532,22 +532,27 @@ function saveCsv() {
   download(new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }), 'csv');
 }
 
-function download(blob, ext) {
-  const a = document.createElement('a');
-  const d = new Date(S.wall[0]);
-  const stamp = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-  a.href = URL.createObjectURL(blob); a.download = `RideDisplay_${mode}_${stamp}.${ext}`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-}
+function download(blob, ext) { downloadFor(S, mode, ext, blob); }
 
+function rideFileName(S2, m, ext) {
+  const d = new Date(S2.wall[0]), p2 = v => String(v).padStart(2, '0');
+  return `RideDisplay_${m}_${String(d.getFullYear()).slice(2)}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.${ext}`;
+}
 function downloadFor(S2, m, ext, blob) {
   const a = document.createElement('a');
-  const d = new Date(S2.wall[0]);
-  const stamp = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-  a.href = URL.createObjectURL(blob); a.download = `RideDisplay_${m}_${stamp}.${ext}`;
+  const name = rideFileName(S2, m, ext);
+  // octet-stream: Android Chrome saves it as is; the link stays valid for 10 min
+  // in case Chrome first asks whether to download it
+  a.href = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' })); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 600000);
+  banner(`Saved to Downloads: ${name} (Files app → Downloads, or Chrome ⋮ → Downloads)`); setTimeout(() => banner(''), 8000);
+}
+// Android: send the file straight to Drive, mail, … with the share sheet
+async function shareFile(S2, m, ext, blob) {
+  const file = new File([blob], rideFileName(S2, m, ext), { type: 'application/octet-stream' });
+  try { await navigator.share({ files: [file], title: file.name }); }
+  catch (e) { if (e.name !== 'AbortError') downloadFor(S2, m, ext, blob); }
 }
 
 function saveFit() {
@@ -643,6 +648,11 @@ async function showRides() {
     const fitBtn = document.createElement('button'); fitBtn.textContent = 'Save FIT';
     fitBtn.onclick = () => downloadFor(r.S, r.mode, 'fit', new Blob([buildFit(r.S, { indoor: r.mode !== 'ghost' })], { type: 'application/vnd.ant.fit' }));
     row.append(fitBtn);
+    if (navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.fit')] })) {
+      const sh = document.createElement('button'); sh.textContent = 'Share';
+      sh.onclick = () => shareFile(r.S, r.mode, 'fit', buildFit(r.S, { indoor: r.mode !== 'ghost' }));
+      row.append(sh);
+    }
     if (r.hasGps) {
       const refBtn = document.createElement('button'); refBtn.className = 'primary'; refBtn.textContent = 'Use as reference';
       refBtn.onclick = async () => {
