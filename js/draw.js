@@ -43,7 +43,7 @@ function arrow(ctx, x, y, angle, size) {
 // Route coloured by grade, with you and the ghost.
 //   view 'all'    - whole route, north up
 //   view 'follow' - heading up around you, `span` metres of road ahead
-export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null } = {}) {
+export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null } = {}) {
   const ctx = fit(canvas);
   if (!ref) return message(ctx, 'Load a reference ride to see its route');
   if (!ref.hasRoute) return message(ctx, 'The reference ride has no GPS route');
@@ -99,6 +99,12 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
       gx = cx + (gx - cx) * k; gy = cy + (gy - cy) * k;
     }
     dot(ctx, gx, gy, view === 'all' ? 7 : 10, C.ghost);
+  }
+  if (videoAt != null) {                         // where the video is: yellow ring
+    const [vx, vy] = toScreen(...ref.xy(Math.max(0, Math.min(ref.total, videoAt))));
+    ctx.beginPath(); ctx.arc(vx, vy, view === 'all' ? 9 : 13, 0, 7);
+    ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = C.accent; ctx.stroke();
   }
   if (you != null) {
     const [yx, yy] = toScreen(...ref.xy(you));

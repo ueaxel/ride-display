@@ -358,11 +358,18 @@ export function initVideoScreen(api) {
       const ctl = api.links.trainer?.control;
       set('vTarget', api.ctlMode !== 'off' && ctl ? ctl.message : (api.ref?.hasPower && you != null ? `ghost ${Math.round(api.ref.at('p', you))} W` : ''));
     }
-    if (layout.map.on) D.drawRoute($('vMap'), api.ref, { you: you ?? 0, ghost, view: mapWhole ? 'all' : 'follow', span: 300, done: you ?? 0, streets: api.streets });
+    const c = clips[cur];
+    const vidAt = c && c.ref === api.ref && view.ready ? c.distAtVideo(view.video.currentTime) : null;
+    if (layout.map.on) {
+      D.drawRoute($('vMap'), api.ref, { you: you ?? 0, ghost, view: mapWhole ? 'all' : 'follow', span: 300, done: you ?? 0, streets: api.streets, videoAt: vidAt });
+      $('vMapInfo').textContent = vidAt == null ? '' :
+        `video ${fmtMin(view.video.currentTime)} = ${(vidAt / 1000).toFixed(2)} km · you ${((you ?? 0) / 1000).toFixed(2)} km · ghost ${((ghost ?? 0) / 1000).toFixed(2)} km`;
+    }
     if (layout.scatter.on) D.drawScatter($('vScatter'), S.power, S.hr, S.power.length - 1, { avg: 10 });
     if (layout.trace.on) D.drawTrace($('vTrace'), S, { window: 600 });
   }
   new ResizeObserver(() => draw()).observe(screen);
+  setInterval(() => { if (document.body.dataset.mode === 'video' && !view.video.paused) draw(); }, 400);
 
   async function enter() {
     if (!clips.length) {

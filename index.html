@@ -114,6 +114,7 @@
   .vnums .label { font-size:10px; }
   .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
   .vnums .s { font-size:12px; color:var(--ghost); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mapinfo { position:absolute; left:10px; right:10px; top:2px; font-size:12px; color:var(--text); text-shadow:0 1px 3px #000; font-variant-numeric:tabular-nums; pointer-events:none; }
   .junction { position:absolute; left:50%; bottom:5%; transform:translateX(-50%); z-index:12; display:none; flex-direction:column; gap:8px;
     background:rgba(11,15,20,.75); border:1px solid var(--accent); border-radius:16px; padding:12px 16px; min-width:320px; }
   .junction .jtitle { color:var(--accent); font-weight:700; font-size:18px; text-align:center; }
@@ -237,7 +238,7 @@
       <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
     </div></div><div class="grip"></div></section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
-    <div class="fbody"><canvas id="vMap"></canvas></div><div class="grip"></div></section>
+    <div class="fbody"><canvas id="vMap"></canvas><div id="vMapInfo" class="mapinfo"></div></div><div class="grip"></div></section>
   <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vScatter"></canvas></div><div class="grip"></div></section>
   <section class="float" data-panel="trace"><div class="fhead">Power &amp; heart rate<button class="fclose" title="Hide">×</button></div>
