@@ -217,7 +217,7 @@ export function startGps(onFix, onError) {
   if (!navigator.geolocation) { onError?.('No GPS in this browser.'); return null; }
   const id = navigator.geolocation.watchPosition(
     pos => onFix({
-      lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy,
+      lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy, alt: pos.coords.altitude,
       speed: pos.coords.speed, heading: pos.coords.heading, time: pos.timestamp,
     }),
     err => { if (err.code !== 3) onError?.(err.message); },   // 3 = timeout: no new position while standing still

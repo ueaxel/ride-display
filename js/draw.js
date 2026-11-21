@@ -269,3 +269,31 @@ export function drawGapGauge(canvas, gapM, range = 100) {
 }
 
 export { interp };
+
+// Riding without a reference: streets of the offline area around you, your
+// track so far, heading-up. trail = [[x, y], ...] in the area's metres.
+export function drawFreeMap(canvas, streets, { you = null, heading = 0, trail = [], span = 300, anchor = 0.7, labelZone = null, note = '' } = {}) {
+  const ctx = fit(canvas);
+  if (!you) return message(ctx, note || 'Waiting for GPS…');
+  const s = (ctx.h * (anchor - 0.08)) / span, sx = ctx.w / 2, sy = ctx.h * anchor;
+  const c = Math.cos(heading), sn = Math.sin(heading);
+  const toScreen = (x, y) => { const dx = x - you[0], dy = y - you[1]; return [sx + s * (dx * c - dy * sn), sy - s * (dx * sn + dy * c)]; };
+  if (streets) {
+    ctx.labelZone = labelZone;
+    drawStreets(ctx, streets, toScreen, s, { cx: you[0], cy: you[1], r: Math.hypot(ctx.w, ctx.h) / s });
+    ctx.fillStyle = '#6B7685'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+    ctx.fillText('© OpenStreetMap contributors', 6, ctx.h - 5);
+  } else {
+    ctx.fillStyle = C.muted; ctx.font = '13px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(note || 'No offline map here — ☰ → Download map around me', ctx.w / 2, 22);
+  }
+  if (trail.length > 1) {                          // where you've been
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const [w, col] of [[9, '#000'], [5, C.teal]]) {
+      ctx.lineWidth = w; ctx.strokeStyle = col; ctx.beginPath();
+      trail.forEach(([x, y], i) => { const [px, py] = toScreen(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+      ctx.stroke();
+    }
+  }
+  arrow(ctx, sx, sy, 0, 16);
+}

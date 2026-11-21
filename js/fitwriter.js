@@ -82,7 +82,7 @@ export function buildFit(S, { indoor = true } = {}) {
   w.define(1, 21, [[253, 'u32'], [0, 'enum'], [1, 'enum']]);
   w.data(1, { 253: t0, 0: 0, 1: 0 });
   // records
-  w.define(2, 20, [[253, 'u32'], [0, 's32'], [1, 's32'], [3, 'u8'], [4, 'u8'], [5, 'u32'], [6, 'u16'], [7, 'u16']]);
+  w.define(2, 20, [[253, 'u32'], [0, 's32'], [1, 's32'], [2, 'u16'], [3, 'u8'], [4, 'u8'], [5, 'u32'], [6, 'u16'], [7, 'u16']]);
   let last = t0;
   for (let i = 0; i < n; i++) {
     const ts = Math.max(last + 1, fitTime(S.wall[i]));
@@ -92,6 +92,7 @@ export function buildFit(S, { indoor = true } = {}) {
     }
     w.data(2, {
       253: ts, 0: semicircles(S.lat[i]), 1: semicircles(S.lon[i]),
+      2: S.alt && S.alt[i] != null ? (S.alt[i] + 500) * 5 : null,
       3: S.hr[i] > 0 ? S.hr[i] : null, 4: S.cad[i], 5: S.dist[i] * 100, 6: S.speed[i] * 1000,
       7: S.power[i],
     });

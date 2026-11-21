@@ -137,11 +137,18 @@
   .syncing .float[data-panel], .syncing .junction { display:none !important; }
   .cliprow { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
   .cliprow > div { flex:1; font-size:14px; }
+  .riderow { flex-wrap:wrap; }
+  .riderow > div { flex-basis:100%; }
   .cliprow select { background:#0B0F14; border:1px solid var(--line); border-radius:8px; padding:6px; max-width:320px; }
   .cliprow.current b { color:var(--teal); }
   .muted { color:var(--muted); }
   #dlgClips { max-width:860px; }
   #vClipList { max-height:50vh; overflow:auto; }
+
+  /* ---------- phone, free ride (no reference): no gap gauge ---------- */
+  body.free #gauge, body.free .gaugelab, body.free .gnum .r { display:none; }
+  body.free .gapsec { color:var(--text); }
+  body.free #gResync { visibility:hidden; }
 
   /* ---------- phone, riding: map full screen, numbers float on it ---------- */
   #ghost { position:relative; }
@@ -241,7 +248,7 @@
     <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button></div></div>
   <div class="gnums">
     <div class="gnum"><div class="label">Heart rate</div><div class="v" id="gHr">–</div><div class="r" id="gHrRef"></div></div>
-    <div class="gnum"><div class="label">Speed km/h</div><div class="v" id="gSpeed">–</div><div class="r" id="gSpeedRef"></div></div>
+    <div class="gnum"><div class="label" id="gSpeedLabel">Speed km/h</div><div class="v" id="gSpeed">–</div><div class="r" id="gSpeedRef"></div></div>
   </div>
   <div class="gline"><span id="gTime">0:00</span><span id="gDist">0.00 km</span><span id="gLeft"></span></div>
   <div class="gfoot">
@@ -305,6 +312,21 @@
   <div class="row"><button id="vClipsClose" class="primary">Close</button></div>
 </dialog>
 
+<dialog id="dlgRides">
+  <h2 style="margin-top:0">My rides</h2>
+  <p>Every ride is kept on this device while you ride (the last 30). <b>Save FIT</b> puts it in Downloads, for Garmin Connect (website → Import Data) or Strava. <b>Use as reference</b> lets you race it next time.</p>
+  <div id="ridesList" style="max-height:55vh; overflow:auto"></div>
+  <div class="row"><button id="ridesClose" class="primary">Close</button></div>
+</dialog>
+
+<dialog id="dlgArea">
+  <h2 style="margin-top:0">Offline map</h2>
+  <p>Stores the streets around where you are now on this phone, so the map works on rides without internet. Do it at home on Wi-Fi. On rides with internet, missing parts load by themselves.</p>
+  <div class="row" style="justify-content:flex-start"><button id="area5" class="primary">Within 5 km</button><button id="area10">Within 10 km</button></div>
+  <p id="areaInfo"></p>
+  <div class="row"><button id="areaClose" class="primary">Close</button></div>
+</dialog>
+
 <dialog id="dlgPanels">
   <h2 style="margin-top:0">Panels</h2>
   <p>Drag a panel by its title, resize it at the bottom-right corner. Positions are kept on this computer.</p>
@@ -344,6 +366,10 @@
     <button id="mFit">Save FIT</button>
     <button id="mCsv">Save CSV</button>
     <button id="mFull">Full screen</button>
+  </div>
+  <div class="row" style="justify-content:flex-start">
+    <button id="mRides">My rides</button>
+    <button id="mArea">Download map around me</button>
   </div>
   <div class="row" style="justify-content:flex-start">
     <button id="mAllTrainer">Trainer not listed? Show all devices</button>

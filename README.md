@@ -81,3 +81,9 @@ node Display/tests/check_parsers.mjs        # Bluetooth packets, step fits
 python3 Display/tests/make_video_fixtures.py /tmp/vfix && node Display/tests/check_clips.mjs /tmp/vfix   # video pairing, timing, junctions
 node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ride_video.py: embedded ride, pieces, gaps
 ```
+
+## Riding without a reference (phone)
+
+- With no reference loaded, the phone screen is a **free ride**: big speed, distance and time, average speed, and a map around you that turns with your direction and shows your track so far.
+- **☰ → Download map around me** (5 or 10 km) stores OpenStreetMap streets on the phone in squares of about 2 × 2 km, so the map works without internet. On rides with internet, missing squares load by themselves.
+- **☰ → My rides**: every ride (outdoor or indoor) is kept on the device, saved every 30 s and when you stop, so it survives a reload. Each one has **Save FIT** (Garmin Connect / Strava), **Use as reference** (race it next time) and **Delete**. The newest 30 are kept.

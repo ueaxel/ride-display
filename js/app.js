@@ -10,6 +10,8 @@ import * as D from './draw.js';
 import { buildFit, fitFromZip } from './fitwriter.js';
 import { downloadStreets, saveStreets, loadStreets, deleteStreets } from './streets.js';
 import { initVideoScreen } from './videoscreen.js';
+import { AreaMap, downloadArea, countTiles } from './areamap.js';
+import { saveRide, listRides, deleteRide } from './myrides.js';
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -19,7 +21,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '21 (21 Nov 2026, riding layout)';
+export const APP_VERSION = '22 (21 Nov 2026, free ride map, my rides)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -27,6 +29,8 @@ const indoorMode = () => mode !== 'ghost';
 let pos = 0, odo = 0, lastTickAt = 0;           // position on the current route / total distance ridden
 let refKey = null;                               // streets storage key of the current route
 let video = null;                                // video screen (videoscreen.js)
+const area = new AreaMap();                      // offline streets for riding without a reference
+let areaAt = null, trail = [], heading = 0;      // last area check, your track (area metres), direction
 const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg) };
 let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
@@ -43,7 +47,8 @@ let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = nul
 
 function newRide() {
   S = { power: [], hr: [], cad: [], speed: [], dist: [], refDist: [], gapM: [], gapS: [], refPower: [], refHr: [],
-    lat: [], lon: [], wall: [] };
+    lat: [], lon: [], alt: [], wall: [] };
+  trail = [];
   running = false; clock = new MovingClock(); indoor = new IndoorRide(rider);
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
   offset = 0; finished = null; steps = new StepFinder(); lastFix = null;
@@ -119,10 +124,14 @@ function tick() {
   } else {
     fix = now - live.tFix < 5000 ? live.fix : null;
     const prev = last(S.dist) ?? 0;
-    if (fix && matcher) dist = matcher.update(fix);
-    else if (fix && lastFix) dist = prev + haversine(lastFix, fix);
-    else dist = prev;
-    if (fix) lastFix = fix;
+    if (fix && matcher) { dist = matcher.update(fix); lastFix = fix; }
+    else if (fix && lastFix) {
+      // free riding: count GPS distance, ignoring the wobble of a phone standing still
+      const step = haversine(lastFix, fix);
+      if (step > Math.min(8, Math.max(2, (fix.acc || 5) * 0.5)) || (fix.speed ?? 0) > 1) { dist = prev + step; lastFix = fix; }
+      else dist = prev;
+    } else { dist = prev; if (fix) lastFix = fix; }
+    if (fix && (!areaAt || haversine(areaAt, fix) > 300)) { areaAt = fix; area.ensure(fix.lat, fix.lon).then(() => render()); }
     speed = fix && fix.speed != null && fix.speed >= 0 ? fix.speed : Math.max(0, dist - prev);
     moving = clock.tick(speed);
     odo = dist;
@@ -135,7 +144,9 @@ function tick() {
 
   S.power.push(indoorMode() ? power : null);
   S.cad.push(indoorMode() ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
-  S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null);
+  S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null); S.alt.push(fix && fix.alt != null ? fix.alt : null);
+  if (fix) trail.push(area.xy(fix.lat, fix.lon));
+  if (S.wall.length % 30 === 0) saveRide(S, mode);          // kept on the phone as you ride
   const t = clock.seconds;
   if (ref) {
     const refSec = t - offset;
@@ -145,7 +156,7 @@ function tick() {
     S.gapS.push(ref.timeAt(Math.min(dist, ref.total)) - refSec);   // + = ahead
     S.refPower.push(ref.hasPower ? ref.at('p', Math.min(dist, ref.total)) : null);
     S.refHr.push(ref.at('hr', Math.min(dist, ref.total)) || null);
-    if (dist >= ref.total) finished = { gapS: ref.totalTime - refSec };
+    if (dist >= ref.total) { finished = { gapS: ref.totalTime - refSec }; saveRide(S, mode); }
   } else {
     for (const k of ['refDist', 'gapM', 'gapS', 'refPower', 'refHr']) S[k].push(null);
   }
@@ -289,7 +300,13 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
 
 function renderGhost(t, you, ghost, gapM, gapS, hr) {
   const g = $('gGap');
-  if (ref && finished) {
+  const free = !ref;                              // riding without a reference: speed, distance, map around you
+  document.body.classList.toggle('free', free);
+  if (free) {
+    const sp = last(S.speed), km = (last(S.dist) ?? 0) / 1000;
+    g.innerHTML = running && sp != null ? `${(sp * 3.6).toFixed(1)}<span class="unit">km/h</span>` : '–'; g.className = 'gapbig';
+    $('gGapS').textContent = running || t ? `${km.toFixed(2)} km · ${fmtTime(t)}` : 'free ride: tap Start (or load a reference ride to race it)';
+  } else if (ref && finished) {
     g.innerHTML = `${sign(gapS)}<span class="unit">s</span>`; g.className = 'gapbig ' + (gapS >= 0 ? 'good' : 'bad');
     $('gGapS').textContent = `finished ${gapS >= 0 ? 'ahead of' : 'behind'} the original`;
   } else if (ref && gapM != null) {
@@ -304,13 +321,28 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   const rh = last(S.refHr);
   $('gHrRef').textContent = rh ? `ghost ${Math.round(rh)}` + (hr ? ` (${sign(hr - rh)})` : '') : '';
   const sp = last(S.speed);
-  $('gSpeed').textContent = sp != null && running ? (sp * 3.6).toFixed(1) : '–';
+  $('gSpeedLabel').textContent = free ? 'Average km/h' : 'Speed km/h';
+  $('gSpeed').textContent = free ? (t > 0 ? ((last(S.dist) ?? 0) / t * 3.6).toFixed(1) : '–') : sp != null && running ? (sp * 3.6).toFixed(1) : '–';
   $('gSpeedRef').textContent = ref && you != null ? `ghost ${ref.at('v', you).toFixed(1)}` + (ref.hasPower ? ` · ${Math.round(ref.at('p', you))} W` : '') : '';
   $('gTime').textContent = fmtTime(t);
   $('gDist').textContent = `${((last(S.dist) ?? 0) / 1000).toFixed(2)} km`;
   $('gLeft').textContent = ref ? `${(Math.max(0, ref.total - (you ?? 0)) / 1000).toFixed(2)} km to go` : '';
   $('gOff').style.display = matcher && matcher.offRoute ? 'block' : 'none';
   const riding = document.body.classList.contains('riding');
+  if (free) {
+    const f = Date.now() - live.tFix < 10000 ? live.fix : lastFix;
+    const me = f ? area.xy(f.lat, f.lon) : null;
+    // heading from your last ~20 m of track
+    if (me && trail.length > 1) {
+      for (let i = trail.length - 1; i >= 0; i--) {
+        const dx = me[0] - trail[i][0], dy = me[1] - trail[i][1];
+        if (Math.hypot(dx, dy) > 20) { heading = Math.atan2(dx, dy); break; }
+      }
+    }
+    D.drawFreeMap($('gmap'), area.streets, { you: me, heading, trail, span: riding ? ghostSpan * 1.3 : ghostSpan,
+      anchor: riding ? 0.64 : 0.72, labelZone: riding ? [0.3, 0.7] : null, note: links.gps ? '' : 'Tap GPS to see where you are' });
+    return;
+  }
   D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets,
     anchor: riding ? 0.64 : 0.78, labelZone: riding ? [0.3, 0.7] : null });
 }
@@ -320,6 +352,7 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
 function toggleStart() {
   if (finished) return;
   running = !running;
+  if (!running) saveRide(S, mode);
   render();
 }
 
@@ -407,6 +440,15 @@ function download(blob, ext) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
+function downloadFor(S2, m, ext, blob) {
+  const a = document.createElement('a');
+  const d = new Date(S2.wall[0]);
+  const stamp = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  a.href = URL.createObjectURL(blob); a.download = `RideDisplay_${m}_${stamp}.${ext}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 function saveFit() {
   if (!S.dist.length) { banner('Nothing recorded yet.'); return; }
   try { download(new Blob([buildFit(S, { indoor: indoorMode() })], { type: 'application/vnd.ant.fit' }), 'fit'); }
@@ -440,6 +482,15 @@ async function loadRefFile(file) {
     const untilKm = parseFloat($('refUntil').value) || null;
     const base = file.name.replace(/\.(fit|zip)$/i, '');
     const prof = profileFromFit(buf, { untilKm, rider, name: base + (untilKm ? ` (to ${untilKm} km)` : '') });
+    await addRef(prof);
+  } catch (e) {
+    $('refInfo').innerHTML = `<span class="err">${e.message}</span>`;
+  }
+  $('refFile').value = '';
+}
+
+async function addRef(prof) {
+  {
     refs = refs.filter(r => r.name !== prof.name);
     refs.unshift({ name: prof.name, prof: compact(prof) });
     while (refs.length > 6) refs.pop();
@@ -450,10 +501,65 @@ async function loadRefFile(file) {
     $('refList').value = '0';
     showRefInfo(saved ? '' : '<span class="err">Could not save it on this device (storage full); it works until you reload.</span>');
     await getStreets();
-  } catch (e) {
-    $('refInfo').innerHTML = `<span class="err">${e.message}</span>`;
   }
-  $('refFile').value = '';
+}
+
+// ------------------------------------------------------------------ my rides, offline map
+
+async function showRides() {
+  const box = $('ridesList');
+  box.innerHTML = '<p class="muted">Loading…</p>';
+  $('dlgRides').showModal();
+  const rides = await listRides();
+  box.innerHTML = rides.length ? '' : '<p class="muted">No rides yet. Rides are kept here automatically while you ride.</p>';
+  for (const r of rides) {
+    const row = document.createElement('div');
+    row.className = 'cliprow riderow';
+    const when = new Date(r.start).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    row.innerHTML = `<div><b>${when}</b><br><span class="muted">${(r.dist / 1000).toFixed(2)} km · ${fmtTime(r.seconds)} · ${r.mode === 'ghost' ? 'outdoor' : 'indoor'}</span></div>`;
+    const fitBtn = document.createElement('button'); fitBtn.textContent = 'Save FIT';
+    fitBtn.onclick = () => downloadFor(r.S, r.mode, 'fit', new Blob([buildFit(r.S, { indoor: r.mode !== 'ghost' })], { type: 'application/vnd.ant.fit' }));
+    row.append(fitBtn);
+    if (r.hasGps) {
+      const refBtn = document.createElement('button'); refBtn.className = 'primary'; refBtn.textContent = 'Use as reference';
+      refBtn.onclick = async () => {
+        try {
+          const bytes = buildFit(r.S, { indoor: false });
+          const prof = profileFromFit(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), { rider, name: `My ride ${when}` });
+          await addRef(prof);
+          if (running) toggleStart();
+          newRide();                                   // the ride you were on is kept in My rides
+          $('dlgRides').close(); banner(`Reference: My ride ${when}. Go to its start and tap Start to race it.`);
+        } catch (e) { banner('Could not use it: ' + e.message); }
+      };
+      row.append(refBtn);
+    }
+    const del = document.createElement('button'); del.textContent = 'Delete';
+    del.onclick = async () => { await deleteRide(r.id); row.remove(); };
+    row.append(del);
+    box.appendChild(row);
+  }
+}
+
+async function showArea() {
+  $('dlgArea').showModal();
+  const n = await countTiles();
+  $('areaInfo').textContent = n ? `${n} map squares (about 2 × 2 km each) stored on this phone.` : 'No offline map stored yet.';
+}
+async function getArea(km) {
+  const f = live.fix || lastFix;
+  if (!f) {
+    if (!links.gps) toggleGps();
+    $('areaInfo').textContent = 'Waiting for GPS… tap again when the GPS dot is green.';
+    return;
+  }
+  if (!navigator.onLine) { $('areaInfo').textContent = 'No internet: do this at home on Wi-Fi.'; return; }
+  $('areaInfo').textContent = 'Downloading…';
+  const r = await downloadArea(f.lat, f.lon, km, (done, total, failed) => {
+    $('areaInfo').textContent = `Downloading streets: ${done} of ${total} squares${failed ? ` (${failed} failed: busy map server, try again later)` : ''}…`;
+  });
+  $('areaInfo').textContent = `Done: streets within ${km} km stored on this phone${r.failed ? ` (${r.failed} squares failed: tap again later to fill them in)` : ''}.`;
+  areaAt = null; area.tiles.clear(); area.ensure(f.lat, f.lon, false).then(() => render());
 }
 
 async function getStreets() {
@@ -486,6 +592,11 @@ const onTrainerData = d => {
 $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
 $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), onTrainerData);
 $('btnGps').onclick = toggleGps;
+$('mRides').onclick = () => { $('dlgMenu').close(); showRides(); };
+$('ridesClose').onclick = () => $('dlgRides').close();
+$('mArea').onclick = () => { $('dlgMenu').close(); showArea(); };
+$('area5').onclick = () => getArea(5); $('area10').onclick = () => getArea(10);
+$('areaClose').onclick = () => $('dlgArea').close();
 let peekTimer = null;
 $('gPeek').onclick = () => {           // riding layout: show the top bar for a few seconds
   document.body.classList.add('peek'); clearTimeout(peekTimer);
@@ -557,4 +668,4 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video }; }, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video, area, trail }; }, showRides, getArea, selectRef, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };
