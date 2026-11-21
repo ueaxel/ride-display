@@ -53,6 +53,16 @@ When you load a reference, the page also downloads the streets within about 200 
 
 **Junctions.** Where another clip runs along the same road as the one you're riding, the app looks ahead for where the two routes split. About 350 m before the split, it offers the choice: **1** stays on your clip, **2**, **3**… take the other clip (keys or click). Taking it switches to the other video at the same spot on the road, so the picture doesn't jump. At the end of a clip, if another clip carries on along the same road, the app continues on it automatically. So record the turns you want as separate rides (videos) that share the road before the junction.
 
+## One ride video (automatic)
+
+`Make Ride Video.command` (in `dev/garmin`) turns a watch ride and the GoPro recordings made during it into **one file** with everything inside: `RideVideo_YYMMDD_HHMM.mp4`. In the app, pick that one file (Clips → pick files, or open the folder) and ride. No pairing, no sync.
+
+1. Put in one folder: the watch ride's `.fit`, the GoPro **originals** as they come off the card (`GS01xxxx.360`, `GS02xxxx.360` … for the MAX; `GX01xxxx.MP4` … for a HERO), and for `.360` files the **full-length** 360° exports from GoPro Player (any names; they're matched to the originals by length, so don't trim them).
+2. Double-click `Make Ride Video.command` and choose the folder.
+3. It reads the **GPS time** (UTC) from each original's telemetry and fine-tunes it by laying the camera's GPS track over the watch's. That's exact even when the camera clock is off. Without a GPS fix (or on a HERO12, which has no GPS), it uses the camera clock; check that ride once with **Sync**. It then joins chapters and separate recordings into one video without re-encoding, and embeds the ride. Where the camera was off, the app shows the map and says so.
+
+Joining several pieces needs **ffmpeg** once: `brew install ffmpeg`. A single piece works without it. The file is as big as the videos together; files over 4 GB don't fit on FAT32 USB sticks.
+
 ## HR response panel
 
 Each clear power step (≥ 40 W, held for a minute) gets a fit of the next 2 minutes of heart rate to a first-order response with a dead time: delay, then time constant τ. This is the simple form of the delay and response times in de Leeuw et al. 2025 (see the project's LITERATURE.md). Power drops also give the 60-s HR recovery. The panel shows medians of the fits with R² ≥ 0.8.
@@ -69,4 +79,5 @@ On the Pixel, at home on Wi-Fi: open the address in Chrome, then ⋮ → **Add t
 python3 Display/tests/check_reference.py   # JS profile/power vs the Python tools
 node Display/tests/check_parsers.mjs        # Bluetooth packets, step fits
 python3 Display/tests/make_video_fixtures.py /tmp/vfix && node Display/tests/check_clips.mjs /tmp/vfix   # video pairing, timing, junctions
+node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ride_video.py: embedded ride, pieces, gaps
 ```

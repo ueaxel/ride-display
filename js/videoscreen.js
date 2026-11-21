@@ -282,7 +282,7 @@ export function initVideoScreen(api) {
     const c = clips[syncClip], v = view.video;
     const d = c.distAtVideo(v.currentTime || 0);
     D.drawRoute($('vSyncMap'), c.ref, { you: Math.max(0, Math.min(c.ref.total, d)), view: 'all', streets: api.streets });
-    $('vSyncTime').textContent = `video ${fmtMin(v.currentTime || 0)} · ride +${fmtMin(Math.max(0, (v.currentTime || 0) + c.v0))} · ${(d / 1000).toFixed(2)} km`;
+    $('vSyncTime').textContent = `video ${fmtMin(v.currentTime || 0)} · ride +${fmtMin(Math.max(0, c.ref.elapsedAt(d)))} · ${(d / 1000).toFixed(2)} km`;
     $('vSyncSlider').max = Math.floor(v.duration || 0);
     $('vSyncSlider').value = Math.floor(v.currentTime || 0);
   }
@@ -302,7 +302,7 @@ export function initVideoScreen(api) {
   // the watch recording started at this video moment (ride clock 0 s)
   $('vSyncStart').onclick = async () => {
     const c = clips[syncClip];
-    c.v0 = -view.video.currentTime; c.synced = true; syncChanged = true;
+    c.syncAt(0, view.video.currentTime); c.synced = true; syncChanged = true;
     await saveClip(c); linkChapters(clips, c);
     $('vSyncHint').textContent = `Saved: the ride starts at video ${fmtMin(view.video.currentTime)}. Check a spot later in the ride on the map, then Done.`;
     drawSync();
@@ -319,10 +319,10 @@ export function initVideoScreen(api) {
       if (!best || dd < best.dd) best = { dd, d: c.prof.d[i] };
     }
     if (!best || best.dd > 40 ** 2) { $('vSyncHint').textContent = 'Click closer to the route.'; return; }
-    c.v0 = c.ref.elapsedAt(best.d) - view.video.currentTime;
+    c.syncAt(c.ref.elapsedAt(best.d), view.video.currentTime);
     c.synced = true; syncChanged = true;
     await saveClip(c); linkChapters(clips, c);
-    $('vSyncHint').textContent = `Synced: video 0:00 = ride +${fmtMin(Math.max(0, c.v0))}. Check another spot to confirm, then Done.`;
+    $('vSyncHint').textContent = `Synced at this spot. Check another spot to confirm, then Done.`;
     drawSync();
   });
 
@@ -358,7 +358,8 @@ export function initVideoScreen(api) {
     }
     const target = c.videoTime(p);
     // video seconds per metre here, times your speed
-    const dvd = (c.videoTime(p + 5) - c.videoTime(p - 5)) / 10;
+    let dvd = (c.videoTime(p + 5) - c.videoTime(p - 5)) / 10;
+    if (!Number.isFinite(dvd)) dvd = 1 / Math.max(1, api.live.speedNow || 1);
     const flow = api.running && api.live.moving ? Math.max(0, Math.min(4, dvd * (api.live.speedNow || 0))) : 0;
     follower.update(target, flow);
     // video exported with World Lock: its picture keeps the direction the camera
@@ -368,7 +369,8 @@ export function initVideoScreen(api) {
       let diff = Math.atan2(Math.sin(want - view.extraYaw), Math.cos(want - view.extraYaw));
       view.extraYaw += diff * 0.15;                       // smooth
     } else view.extraYaw = 0;
-    const msg = follower.state === 'before' ? 'The video starts a little further on' : follower.state === 'after' ? 'End of this video' : '';
+    const msg = follower.state === 'before' ? 'The video starts a little further on' : follower.state === 'after' ? 'End of this video'
+      : follower.state === 'gap' ? 'No video for this part (the camera was off)' : '';
     if ($('vMsg').dataset.state !== follower.state) { $('vMsg').textContent = msg; $('vMsg').dataset.state = follower.state; }
   };
 

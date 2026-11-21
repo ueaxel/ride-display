@@ -129,6 +129,7 @@ export class VideoFollower {
   update(target, flow) {
     const v = this.view.video;
     if (!this.view.ready || target == null) { if (!v.paused) v.pause(); this.state = 'idle'; return; }
+    if (Number.isNaN(target)) { if (!v.paused) v.pause(); this.state = 'gap'; return; }   // camera was off here
     const dur = v.duration || Infinity;
     if (target < 0 || target > dur) {
       if (!v.paused) v.pause();

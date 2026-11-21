@@ -49,6 +49,35 @@ export async function mp4Info(file) {
   return { created: null, duration: null };
 }
 
+// Ride data embedded by tools/make_ride_video.py: a top-level 'uuid' box
+// (after the video) holding JSON with the .fit and the timing.
+const RIDE_UUID = '5269646544697370b1a7e0c35e6f9a21';
+export async function readRideBox(file) {
+  const read = async (pos, len) => new Uint8Array(await file.slice(pos, pos + len).arrayBuffer());
+  let pos = 0;
+  for (let guard = 0; guard < 64 && pos + 8 <= file.size; guard++) {
+    const h = await read(pos, 16), dv = new DataView(h.buffer);
+    let size = dv.getUint32(0), head = 8;
+    const type = String.fromCharCode(h[4], h[5], h[6], h[7]);
+    if (size === 1) { size = Number(dv.getBigUint64(8)); head = 16; }
+    if (size === 0) size = file.size - pos;
+    if (size < 8) return null;
+    if (type === 'uuid') {
+      const body = await read(pos + head, size - head);
+      const id = [...body.subarray(0, 16)].map(b => b.toString(16).padStart(2, '0')).join('');
+      if (id === RIDE_UUID) { try { return JSON.parse(new TextDecoder().decode(body.subarray(16))); } catch (e) { return null; } }
+    }
+    pos += size;
+  }
+  return null;
+}
+
+function fromBase64(b64) {
+  const s = atob(b64), out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out.buffer;
+}
+
 // First guess of v0: the camera clock is often local time written as UTC, so
 // try the file's time zone too, and keep the one that falls inside the ride.
 export function guessV0(prof, info) {
@@ -62,18 +91,44 @@ export function guessV0(prof, info) {
 // ------------------------------------------------------------ clip objects
 
 export class Clip {
-  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0, roll = 0, tilt = 0 }) {
-    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt });
+  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0, roll = 0, tilt = 0,
+    segs = null, baseV0 = null, embedded = false }) {
+    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, embedded });
+    // a ride video from make_ride_video.py: several pieces, maybe with gaps;
+    // segs = [{v: video s, r: ride s, dur}]. Sync moves them all (v0 - baseV0).
+    this.baseV0 = baseV0 ?? v0;
     this.prof = prof;
     this.ref = new Reference(prof);
     this.file = null;          // the video File (picked each session)
     this.url = null;
   }
   get label() { return this.name.replace(VIDEO, ''); }
-  // Second of video for a distance along the route (may be outside the video).
-  videoTime(dist) { return this.ref.elapsedAt(dist) - this.v0; }
-  distAtVideo(t) { return this.ref.distAtElapsed(t + this.v0); }
+  // Second of video for a distance along the route: < 0 before the video,
+  // > duration after it, NaN in a gap where the camera was off.
+  videoTime(dist) {
+    const e = this.ref.elapsedAt(dist);
+    if (!this.segs) return e - this.v0;
+    const sh = this.v0 - this.baseV0, S = this.segs;
+    if (e < S[0].r + sh) return S[0].v + e - (S[0].r + sh);
+    for (const s of S) if (e <= s.r + sh + s.dur) return e >= s.r + sh ? s.v + e - (s.r + sh) : NaN;
+    const l = S[S.length - 1];
+    return l.v + l.dur + (e - (l.r + sh + l.dur));
+  }
+  distAtVideo(t) {
+    if (!this.segs) return this.ref.distAtElapsed(t + this.v0);
+    const sh = this.v0 - this.baseV0;
+    let s = this.segs[0];
+    for (const x of this.segs) if (t >= x.v) s = x;
+    return this.ref.distAtElapsed(s.r + sh + (t - s.v));
+  }
   covers(dist) { const t = this.videoTime(dist); return t >= 0 && t <= (this.duration || Infinity); }
+  // Sync: video second t shows ride second e (clock time since the ride's start).
+  syncAt(e, t) {
+    if (!this.segs) { this.v0 = e - t; return; }
+    let s = this.segs[0];
+    for (const x of this.segs) if (t >= x.v) s = x;
+    this.v0 = this.baseV0 + (s.v + e - s.r - t);
+  }
   // part of the route the video covers
   get videoRange() {
     const a = this.distAtVideo(0), b = this.duration ? this.distAtVideo(this.duration) : this.ref.total;
@@ -89,8 +144,8 @@ export class Clip {
     this.file = file; this.url = URL.createObjectURL(file);
   }
   toJSON() {
-    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, prof } = this;
-    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, prof };
+    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof } = this;
+    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof };
   }
 }
 
@@ -152,6 +207,21 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
     const id = clipId(v);
     let clip = known.get(id);
     if (!clip) {
+      // one ride video with everything inside (make_ride_video.py)
+      const meta = await readRideBox(v).catch(() => null);
+      if (meta && meta.fit && meta.segments?.length) {
+        onProgress(`Reading ride video ${v.name}`);
+        const prof = profileFromFit(fromBase64(meta.fit), { rider, name: v.name.replace(VIDEO, '') });
+        const info = await mp4Info(v).catch(() => ({ duration: null, created: null }));
+        const s0 = meta.segments[0], v0 = s0.r - s0.v;
+        clip = new Clip({ id, name: v.name, fitName: meta.fitName, prof, v0, baseV0: v0, segs: meta.segments.map(({ v: a, r, dur }) => ({ v: a, r, dur })),
+          duration: info.duration, created: info.created, synced: true, embedded: true });
+        await saveClip(clip);
+        clip.setFile(v); out.push(clip);
+        continue;
+      }
+    }
+    if (!clip) {
       onProgress(`Reading video ${v.name}`);
       const info = await mp4Info(v).catch(() => ({ created: null, duration: null }));
       let best = null;
@@ -193,7 +263,7 @@ export async function pairByHand(video, info, ride) {
 export function linkChapters(clips, anchor = null) {
   const groups = new Map();
   for (const c of clips) {
-    const k = c.fitName + '|' + (c.prof.start || '');
+    const k = c.embedded ? 'embedded|' + c.id : c.fitName + '|' + (c.prof.start || '');
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(c);
   }
