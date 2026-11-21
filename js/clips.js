@@ -62,8 +62,8 @@ export function guessV0(prof, info) {
 // ------------------------------------------------------------ clip objects
 
 export class Clip {
-  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false }) {
-    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock });
+  constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0 }) {
+    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward });
     this.prof = prof;
     this.ref = new Reference(prof);
     this.file = null;          // the video File (picked each session)
@@ -88,8 +88,8 @@ export class Clip {
     this.file = file; this.url = URL.createObjectURL(file);
   }
   toJSON() {
-    const { id, name, fitName, v0, duration, created, synced, worldLock, prof } = this;
-    return { id, name, fitName, v0, duration, created, synced, worldLock, prof };
+    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, prof } = this;
+    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, prof };
   }
 }
 

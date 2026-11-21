@@ -64,7 +64,8 @@ export class VideoView {
     this.video.src = url;
     this.video.load();
   }
-  resetView() { this.yaw = 0; this.pitch = -0.08; this.fov = 80; this.onViewChange?.(); }
+  // forward: the yaw that looks along the road for this video (camera may face backwards)
+  resetView(forward = 0) { this.yaw = forward; this.pitch = -0.08; this.fov = 80; this.onViewChange?.(); }
   initGl() {
     const gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
     if (!gl) { this.glFailed = true; return; }

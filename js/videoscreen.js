@@ -70,7 +70,14 @@ export function initVideoScreen(api) {
   $('vPanelsReset').onclick = () => { layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT)); panels.forEach(place); saveLayout(); fillPanelMenu(); draw(); };
   $('btnPanels').onclick = () => { fillPanelMenu(); $('dlgPanels').showModal(); };
   $('vPanelsClose').onclick = () => $('dlgPanels').close();
-  $('btnLook').onclick = () => view.resetView();
+  $('btnLook').onclick = () => view.resetView(clips[cur]?.forward || 0);
+  $('btnForward').onclick = async () => {
+    const c = clips[cur];
+    if (!c) return;
+    c.forward = view.yaw; await saveClip(c);
+    api.banner(`Forward for ${c.label} saved: Look ahead now returns to this view.`);
+    setTimeout(() => api.banner(''), 3000);
+  };
   $('btnTurn').onclick = async () => {
     const c = clips[cur];
     if (!c) return;
@@ -178,6 +185,7 @@ export function initVideoScreen(api) {
     cur = i; setTimeout(updateTurnBtn);
     const c = clips[i];
     view.load(c.url);
+    view.resetView(c.forward || 0);
     api.switchRef(c.ref, p, 'clip:' + c.id);
     $('vMsg').textContent = '';
     choices = [];
@@ -209,9 +217,11 @@ export function initVideoScreen(api) {
   function takeTurn(ch) {
     const p = net.transfer(cur, api.pos, ch.clip);
     if (p == null) return;
+    const lookOff = view.yaw - (clips[cur].forward || 0);      // keep where you were looking
     cur = ch.clip; setTimeout(updateTurnBtn);
     const c = clips[cur];
     view.load(c.url);
+    view.yaw = (c.forward || 0) + lookOff;
     api.switchRef(c.ref, p, 'clip:' + c.id);
     choices = []; showJunction();
   }
