@@ -200,7 +200,7 @@ export function initVideoScreen(api) {
     } catch (e) { $('vClipNotes').textContent = e.message; }
   };
 
-  function applyClipView(c) { view.forwardYaw = c.forward || 0; view.roll = c.roll || 0; view.tilt = c.tilt || 0; updateLevel(); }
+  function applyClipView(c) { view.forwardYaw = c.forward || 0; view.roll = c.roll || 0; view.tilt = c.tilt || 0; view.grav = c.grav || null; updateLevel(); }
   function startClip(i, p) {
     // a chaptered ride: start with the chapter that covers the start point
     const g = clips[i].chapters || [clips[i]];

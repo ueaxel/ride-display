@@ -79,8 +79,37 @@ export class VideoView {
     };
     const f = this.forwardYaw;
     const A = rot([Math.sin(f), 0, -Math.cos(f)], this.roll), B = rot([Math.cos(f), 0, Math.sin(f)], this.tilt);
-    const M = [0, 1, 2].map(i => [0, 1, 2].map(j => A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]));
+    const mul = (P, Q) => [0, 1, 2].map(i => [0, 1, 2].map(j => P[i][0] * Q[0][j] + P[i][1] * Q[1][j] + P[i][2] * Q[2][j]));
+    let M = mul(A, B);
+    const g = this.gravityNow();
+    if (g) {
+      // the camera's gravity sensor: turn "down" in the picture to straight down
+      const a = [0, -1, 0], c = a[0] * g[0] + a[1] * g[1] + a[2] * g[2];
+      const v = [a[1] * g[2] - a[2] * g[1], a[2] * g[0] - a[0] * g[2], a[0] * g[1] - a[1] * g[0]];
+      const s2 = v[0] ** 2 + v[1] ** 2 + v[2] ** 2;
+      if (s2 > 1e-9) {
+        const K = [[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]], K2 = mul(K, K), k = (1 - c) / s2;
+        const G = [0, 1, 2].map(i => [0, 1, 2].map(j => (i === j ? 1 : 0) + K[i][j] + K2[i][j] * k));
+        M = mul(G, M);
+      }
+    }
     return new Float32Array([M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
+  }
+  // Gravity direction in the picture's frame at the current video time, from
+  // the GoPro MAX sensor (make_ride_video.py, meta.grav), smoothed over ±0.6 s.
+  gravityNow() {
+    const G = this.grav;
+    if (!G || !G.xyz || this.autoLevel === false) return null;
+    const t = this.video.currentTime || 0, n = G.xyz.length / 3, k0 = Math.round(t * G.hz);
+    let x = 0, y = 0, z = 0, m = 0;
+    for (let k = Math.max(0, k0 - 3); k <= Math.min(n - 1, k0 + 3); k++) {
+      const gx = G.xyz[3 * k];
+      if (gx == null) continue;
+      x += gx; y += G.xyz[3 * k + 1]; z += G.xyz[3 * k + 2]; m++;
+    }
+    if (!m) return null;
+    const v = [x, -y, -z], L = Math.hypot(...v) || 1;           // GoPro MAX axes -> picture axes
+    return v.map(c => c / L);
   }
   initGl() {
     const gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });

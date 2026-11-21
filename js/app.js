@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '27 (21 Nov 2026, cadence sensor)';
+export const APP_VERSION = '28 (21 Nov 2026, .360 conversion, auto level)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));

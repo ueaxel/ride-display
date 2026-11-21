@@ -100,3 +100,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 ## Cadence sensor
 
 **Cadence** (phone: **Cad**) connects a Bluetooth cadence sensor (Cycling Speed and Cadence, e.g. CYCPLUS). Its cadence is shown on the phone, saved in the ride and the .fit, and on the tablet it takes the place of the trainer's cadence. Dual ANT+/Bluetooth sensors work with the watch and the phone at the same time: pair the watch over **ANT+**, the phone uses Bluetooth.
+
+## GoPro MAX .360 straight into a ride video
+
+`Make Ride Video.command` now converts the GoPro MAX's own `.360` files itself (no GoPro Player export needed): put the watch `.fit` and all `.360` chapters of the ride in one folder and run it. Each chapter's two lens tracks become one 360° (equirectangular) video (ffmpeg; on a Mac with the hardware HEVC encoder, about as long as the ride), the chapters are joined, and the camera's gravity sensor is stored with the ride, so the video screen keeps the horizon level by itself (the Level sliders still fine-tune). Full-length GoPro Player exports in the folder are still used when present.

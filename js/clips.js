@@ -92,8 +92,8 @@ export function guessV0(prof, info) {
 
 export class Clip {
   constructor({ id, name, fitName, prof, v0 = 0, duration = null, created = null, synced = false, worldLock = false, forward = 0, roll = 0, tilt = 0,
-    segs = null, baseV0 = null, embedded = false }) {
-    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, embedded });
+    segs = null, baseV0 = null, embedded = false, grav = null }) {
+    Object.assign(this, { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, embedded, grav });
     // a ride video from make_ride_video.py: several pieces, maybe with gaps;
     // segs = [{v: video s, r: ride s, dur}]. Sync moves them all (v0 - baseV0).
     this.baseV0 = baseV0 ?? v0;
@@ -144,8 +144,8 @@ export class Clip {
     this.file = file; this.url = URL.createObjectURL(file);
   }
   toJSON() {
-    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof } = this;
-    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof };
+    const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof, grav } = this;
+    return { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof, grav };
   }
 }
 
@@ -215,7 +215,7 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
         const info = await mp4Info(v).catch(() => ({ duration: null, created: null }));
         const s0 = meta.segments[0], v0 = s0.r - s0.v;
         clip = new Clip({ id, name: v.name, fitName: meta.fitName, prof, v0, baseV0: v0, segs: meta.segments.map(({ v: a, r, dur }) => ({ v: a, r, dur })),
-          duration: info.duration, created: info.created, synced: true, embedded: true });
+          duration: info.duration, created: info.created, synced: true, embedded: true, grav: meta.grav || null });
         await saveClip(clip);
         clip.setFile(v); out.push(clip);
         continue;
