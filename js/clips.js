@@ -137,6 +137,7 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
   const videos = files.filter(f => VIDEO.test(f.name)), rides = files.filter(f => RIDE.test(f.name));
   const notes = [];
   const out = [];
+  const unmatched = [];                        // videos whose ride couldn't be found by time or name
   const needRides = videos.some(v => !known.has(clipId(v)));
   const profs = [];
   if (needRides) {
@@ -161,7 +162,7 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
         const score = (inside ? 2 : 0) + (sameName ? 1 : 0);
         if (score && (!best || score > best.score)) best = { score, r, v0: inside ? v0 : 0 };
       }
-      if (!best) { notes.push(`${v.name}: no matching ride (.fit) found — put the watch file of the same ride in the folder.`); continue; }
+      if (!best) { unmatched.push({ file: v, info }); continue; }
       clip = new Clip({ id, name: v.name, fitName: best.r.file.name, prof: best.r.prof, v0: best.v0,
         duration: info.duration, created: info.created, synced: false });
       await saveClip(clip);
@@ -170,7 +171,17 @@ export async function buildClips(files, known, rider = RIDER, onProgress = () =>
     out.push(clip);
   }
   out.sort((a, b) => (a.prof.start || 0) - (b.prof.start || 0));
-  return { clips: out, notes };
+  return { clips: out, notes, unmatched, rides: profs.filter(r => r.prof.x) };
+}
+
+// Pair a video with a ride by hand (e.g. exported videos carry the export
+// time, not the recording time). Sync it afterwards.
+export async function pairByHand(video, info, ride) {
+  const clip = new Clip({ id: clipId(video), name: video.name, fitName: ride.file.name, prof: ride.prof,
+    v0: 0, duration: info.duration, created: info.created, synced: false });
+  await saveClip(clip);
+  clip.setFile(video);
+  return clip;
 }
 
 // All files of a folder picked with showDirectoryPicker (Chrome on Mac/PC).

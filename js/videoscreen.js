@@ -4,7 +4,7 @@
 // them relative to the screen, whatever the video does.
 import { VideoView, VideoFollower } from './view360.js';
 import { ClipNet } from './junctions.js';
-import { buildClips, loadClips, saveClip, deleteClip, filesInFolder, folderPickerAvailable, saveMisc, loadMisc } from './clips.js';
+import { buildClips, pairByHand, loadClips, saveClip, deleteClip, filesInFolder, folderPickerAvailable, saveMisc, loadMisc } from './clips.js';
 import { downloadStreets, saveStreets, loadStreets } from './streets.js';
 import * as D from './draw.js';
 
@@ -93,11 +93,12 @@ export function initVideoScreen(api) {
   async function refreshClips(files) {
     const known = new Map((await loadClips()).map(c => [c.id, c]));
     $('vClipNotes').textContent = 'Reading…';
-    const { clips: list, notes } = await buildClips(files, known, api.rider, msg => { $('vClipNotes').textContent = msg; });
-    clips = list;
+    const { clips: list, notes, unmatched: un, rides } = await buildClips(files, known, api.rider, msg => { $('vClipNotes').textContent = msg; });
+    clips = list; unmatched = un; rideChoices = rides;
     net = clips.length ? new ClipNet(clips) : null;
-    $('vClipNotes').innerHTML = notes.map(n => `<div class="err">${n}</div>`).join('') ||
-      (clips.length ? `${clips.length} clip${clips.length > 1 ? 's' : ''} ready.` : 'No videos found.');
+    $('vClipNotes').innerHTML = notes.map(n => `<div class="err">${n}</div>`).join('') +
+      (clips.length ? `${clips.length} clip${clips.length > 1 ? 's' : ''} ready.` : unmatched.length ? '' : 'No videos found.') +
+      (unmatched.length ? ` ${unmatched.length} video${unmatched.length > 1 ? 's need' : ' needs'} its ride chosen below.` : '');
     fillClipList();
     // streets for each clip (online, once)
     for (const c of clips) {
@@ -106,9 +107,32 @@ export function initVideoScreen(api) {
       }
     }
   }
+  let unmatched = [], rideChoices = [];
   function fillClipList() {
     const box = $('vClipList');
     box.innerHTML = '';
+    // videos that need their ride chosen by hand
+    for (const u of unmatched) {
+      const row = document.createElement('div');
+      row.className = 'cliprow';
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">which ride is this?</option>' + rideChoices.map((r, k) => {
+        const when = r.prof.start ? new Date(r.prof.start * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+        return `<option value="${k}">${r.file.name} — ${when}, ${(r.prof.d[r.prof.d.length - 1] / 1000).toFixed(1)} km</option>`;
+      }).join('');
+      row.innerHTML = `<div><b>${u.file.name}</b><br><span class="warn">${u.info.duration ? fmtMin(u.info.duration) + ' video · ' : ''}ride not found by time or name — choose it:</span></div>`;
+      const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'Pair';
+      ok.onclick = async () => {
+        if (sel.value === '') return;
+        const clip = await pairByHand(u.file, u.info, rideChoices[+sel.value]);
+        unmatched = unmatched.filter(x => x !== u);
+        clips.push(clip); net = new ClipNet(clips);
+        fillClipList();
+        $('vClipNotes').textContent = `Paired ${clip.label} — now tap Sync to line it up with the route.`;
+      };
+      row.append(sel, ok);
+      box.appendChild(row);
+    }
     clips.forEach((c, i) => {
       const [a, b] = c.videoRange;
       const row = document.createElement('div');
