@@ -6,7 +6,7 @@ Turns a bike ride into one video file for the [Ride Display](https://ueaxel.gith
 - the ride from your bike computer or watch: a **.fit** file (Garmin Connect: the activity → ⚙ → *Export Original*; a .zip is fine too after unzipping),
 - the camera files recorded during the ride, straight from the camera:
   - **GoPro MAX** (360°): `GS01xxxx.360`, `GS02xxxx.360`, … (all chapters; `.LRV` / `.THM` can stay, they're ignored),
-  - **GoPro HERO**: `GX01xxxx.MP4` / `GH01xxxx.MP4`, …
+  - **GoPro HERO**: `GX01xxxx.MP4` / `GH01xxxx.MP4`, … (HERO6 and newer), or `GOPRxxxx.MP4`, `GP01xxxx.MP4`, … (HERO5 and older)
 
 **Out:** `RideVideo_YYMMDD_HHMM.mp4` in the same folder, with the ride and the timing inside. In Ride Display: open the video screen (`#video`), **Clips** → pick that one file.
 
@@ -15,6 +15,16 @@ Turns a bike ride into one video file for the [Ride Display](https://ueaxel.gith
 1. **Timing:** reads the GPS time from the camera's own telemetry (exact, whatever the camera clock is set to), then fine-tunes it by laying the camera's GPS track over the ride's. Without a GPS fix it falls back on the camera clock (check with **Sync** in the app).
 2. **360° conversion (GoPro MAX):** the `.360` format stores the picture as two lens tracks of cube faces; they are turned into one 360° (equirectangular) video, the same kind GoPro Player exports. The camera's gravity sensor is stored with the ride, so the app keeps the horizon level by itself. If full-length (untrimmed) GoPro Player exports are in the folder, those are used instead.
 3. **Joining:** chapters and separate recordings become one file; gaps where the camera was off are handled by the app ("no video for this part").
+
+## Cameras
+
+| Camera | Files | |
+|---|---|---|
+| GoPro MAX | `GS01xxxx.360` | 360°: converted here, GPS sync, horizon levelling |
+| GoPro MAX, single-lens mode | `GS01xxxx.MP4` | flat video, GPS sync |
+| HERO5 Black – HERO11, HERO13 | `GX…` / `GH…` / `GOPR…` / `GP…` `.MP4` | flat video, GPS sync |
+| HERO12 (no GPS), HERO4 and older (no telemetry) | `.MP4` | flat video, timed by the camera clock: check with **Sync** in the app |
+| GoPro MAX2, Fusion, other 360° cameras | | export a full-length 360° (equirectangular) .mp4 with the camera's own software and put it next to the originals (MAX2) or use the app's **Clips** to pair it with the .fit and **Sync** it |
 
 ## Install (once)
 

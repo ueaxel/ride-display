@@ -45,7 +45,8 @@ import estimate_power  # noqa: E402  (FIT reader)
 
 FIT_EPOCH = 631065600
 RIDE_UUID = bytes.fromhex('5269646544697370b1a7e0c35e6f9a21')   # "RideDisp" + random: the app looks for this box
-GOPRO = re.compile(r'^G([XHSO]|OPR)?(\d\d)(\d{4})\.(360|MP4)$', re.I)
+GOPRO = re.compile(r'^G([XHSO])(\d\d)(\d{4})\.(360|MP4)$', re.I)       # HERO6+ / MAX: GX011234 = chapter 01 of 1234
+GOPRO_OLD = re.compile(r'^G(OPR|P\d\d)(\d{4})\.MP4$', re.I)              # HERO5 and older: GOPR1234, then GP011234 ...
 
 
 def say(msg):
@@ -382,6 +383,9 @@ def refine(offset, pos, ride, window=8.0):
 # ----------------------------------------------------------------- matching files
 
 def gopro_key(name):
+    m = GOPRO_OLD.match(name)
+    if m:
+        return (m.group(2), 0 if m.group(1).upper() == 'OPR' else int(m.group(1)[1:]))
     m = GOPRO.match(name)
     return (m.group(3), int(m.group(2))) if m else None
 
@@ -417,6 +421,10 @@ def plan(folder, fit_choice=None):
         d = pc['info']['duration']
         match = [e for e, i in export_info.items() if abs(i['duration'] - d) < 0.25]
         if not match:
+            w = pc['info'].get('width')
+            if w and w != 4096:
+                raise SystemExit(f'{pc["orig"].name}: a .360 file {w} px wide (not a GoPro MAX?). This tool converts the MAX\'s '
+                                 f'.360 files only; export it from GoPro Player as 360° video (full length) and put the export here.')
             pc['convert'] = True                          # done here (build), from the original
             pc['video'] = pc['orig']
             pc['vinfo'] = dict(pc['info'], width=5376, height=2688)
