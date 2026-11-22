@@ -42,8 +42,13 @@ No other packages are needed.
 
 Converting 360° video takes roughly as long as the ride on a recent Mac (it uses the Mac's hardware video encoder; elsewhere ffmpeg's slower software encoder). The result is large: about 25 GB for an hour of 5.4K 360° video. Joining files that need no conversion (HERO videos, GoPro Player exports) takes a minute.
 
+## Phone-size copy
+
+`Make Phone Version.command` (or `python3 make_ride_video.py --phone RideVideo_….mp4`) makes `RideVideo_…_phone.mp4` next to it: 2560 × 1280 H.264, about 2.7 GB per hour, with the same ride inside. Copy it onto a phone or tablet (iPhone: AirDrop → Save to Files) and open it on the video screen (Clips → pick it): no streaming needed, ▶ plays the ride.
+
 ## Files
 
 - `make_ride_video.py` — the tool
 - `estimate_power.py` — reads .fit files (and, run on its own, estimates power for rides recorded without a power meter: `python3 estimate_power.py RIDE.fit OUT.fit --rider-kg 75`)
 - `Make Ride Video.command` — double-click starter for the Mac
+- `Make Phone Version.command` — double-click: phone-size copy of a ride video

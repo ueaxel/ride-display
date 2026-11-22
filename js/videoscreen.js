@@ -7,6 +7,7 @@ import { ClipNet } from './junctions.js';
 import { buildClips, pairByHand, linkChapters, loadClips, saveClip, deleteClip, filesInFolder, folderPickerAvailable, saveMisc, loadMisc } from './clips.js';
 import { downloadStreets, saveStreets, loadStreets } from './streets.js';
 import * as D from './draw.js';
+import { chooseLibrary, libraryFolder, scanLibrary, setValidated } from './library.js';
 
 const DEFAULT_LAYOUT = {
   numbers: { x: 0.012, y: 0.085, w: 0.44, h: 0.17, on: true },
@@ -15,6 +16,17 @@ const DEFAULT_LAYOUT = {
   scatter: { x: 0.012, y: 0.6, w: 0.27, h: 0.38, on: true },
   trace: { x: 0.30, y: 0.76, w: 0.42, h: 0.22, on: false },
 };
+
+// phones (small screen, landscape): numbers on top, map and elevation on the
+// right, the plots off, so the video stays visible
+const PHONE_LAYOUT = {
+  numbers: { x: 0.01, y: 0.12, w: 0.62, h: 0.36, on: true },
+  elev: { x: 0.65, y: 0.13, w: 0.34, h: 0.24, on: true },
+  map: { x: 0.65, y: 0.39, w: 0.34, h: 0.59, on: true },
+  scatter: { x: 0.01, y: 0.6, w: 0.3, h: 0.38, on: false },
+  trace: { x: 0.30, y: 0.76, w: 0.42, h: 0.22, on: false },
+};
+const isPhone = () => Math.min(window.innerWidth, window.innerHeight) < 500;
 
 export function initVideoScreen(api) {
   const { $ } = api;
@@ -26,7 +38,7 @@ export function initVideoScreen(api) {
   const view = new VideoView($('vStage'));
   const follower = new VideoFollower(view);
   let clips = [], net = null, cur = -1, choices = [], dirHandle = null, syncing = false, mapWhole = false;
-  let layout = { ...DEFAULT_LAYOUT, ...store.get('videoLayout', {}) };
+  let layout = { ...(isPhone() ? PHONE_LAYOUT : DEFAULT_LAYOUT), ...store.get('videoLayout', {}) };
   if (!store.get('videoLayout', {}).elev) layout.numbers = { ...layout.numbers, w: Math.max(layout.numbers.w, 0.44) };   // room for the new numbers
   const savedView = store.get('videoView', null);
   if (savedView) Object.assign(view, savedView);
@@ -69,7 +81,7 @@ export function initVideoScreen(api) {
       box.appendChild(b);
     }
   }
-  $('vPanelsReset').onclick = () => { layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT)); panels.forEach(place); saveLayout(); fillPanelMenu(); draw(); };
+  $('vPanelsReset').onclick = () => { layout = JSON.parse(JSON.stringify(isPhone() ? PHONE_LAYOUT : DEFAULT_LAYOUT)); panels.forEach(place); saveLayout(); fillPanelMenu(); draw(); };
   $('btnPanels').onclick = () => { fillPanelMenu(); $('dlgPanels').showModal(); };
   $('vPanelsClose').onclick = () => $('dlgPanels').close();
   $('btnLook').onclick = () => view.resetView(clips[cur]?.forward || 0);
@@ -181,7 +193,40 @@ export function initVideoScreen(api) {
   }
   const fmtMin = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
-  $('btnClips').onclick = () => { fillClipList(); $('dlgClips').showModal(); };
+  // ---------------------------------------------------------------- ride library
+  async function showLibrary(ask = false) {
+    if (!folderPickerAvailable()) { $('libBox').style.display = 'none'; return; }
+    const dir = await libraryFolder(ask);
+    $('libOpen').style.display = dir && dir.needsPermission ? '' : 'none';
+    if (!dir) { $('libNote').innerHTML = 'Choose the folder that holds your rides (for example <b>garmin</b>): every RideVideo_….mp4 in it and its subfolders is listed here, one per ride.'; return; }
+    if (dir.needsPermission) { $('libOpen').textContent = `Open library (${dir.name})`; $('libNote').textContent = 'Chrome needs your OK to read the library folder again (once per visit).'; return; }
+    $('libNote').textContent = 'Reading the library…';
+    const rides = await scanLibrary(dir, (i, n) => { $('libNote').textContent = `Reading the library: ${i} of ${n}…`; });
+    $('libNote').textContent = rides.length ? `${rides.length} ride${rides.length > 1 ? 's' : ''} in ${dir.name}. Tick validated on the ones you've checked.` : `No ride videos (RideVideo_….mp4) in ${dir.name} or its subfolders.`;
+    const box = $('libList'); box.innerHTML = '';
+    for (const r of rides) {
+      const row = document.createElement('div'); row.className = 'cliprow librow';
+      const when = r.start ? new Date(r.start * 1000).toLocaleDateString([], { dateStyle: 'medium' }) : '';
+      row.innerHTML = `<div><span class="lib-title">${r.title}</span>${r.phone ? '<span class="tag">phone size</span>' : ''}<br>` +
+        `<span class="muted">${when} · ${r.km.toFixed(1)} km · ${r.climb} m up · ${r.minutes} min riding · video ${r.videoMin} min, ${r.gb.toFixed(1)} GB</span></div>`;
+      const v = document.createElement('label'); v.innerHTML = `<input type="checkbox" ${r.validated ? 'checked' : ''}> validated`;
+      v.querySelector('input').onchange = e => setValidated(r.id, e.target.checked);
+      const go = document.createElement('button'); go.className = 'primary'; go.textContent = 'Ride this';
+      go.onclick = async () => {
+        $('libNote').textContent = `Opening ${r.title}…`;
+        await refreshClips([r.file]);
+        const i = clips.findIndex(c => c.file === r.file);
+        if (i < 0) { $('libNote').textContent = 'Could not open this ride video.'; return; }
+        startClip(i, Math.max(0, clips[i].videoRange[0]));
+        $('dlgClips').close();
+      };
+      row.append(v, go); box.appendChild(row);
+    }
+  }
+  $('libChoose').onclick = async () => { try { await chooseLibrary(); await showLibrary(true); } catch (e) { if (e.name !== 'AbortError') $('libNote').textContent = e.message; } };
+  $('libOpen').onclick = () => showLibrary(true);
+
+  $('btnClips').onclick = () => { fillClipList(); $('dlgClips').showModal(); showLibrary(false); };
   $('vClipsClose').onclick = () => $('dlgClips').close();
   $('vFolder').style.display = folderPickerAvailable() ? '' : 'none';
   $('vFolder').onclick = async () => {

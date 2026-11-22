@@ -91,6 +91,9 @@
   .tbmap { width:100%; height:160px; display:block; margin-top:6px; }
   .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .setgrid input { width:100%; }
+  .librow .lib-title { font-weight:600; }
+  .librow .tag { font-size:11px; padding:1px 6px; border-radius:8px; border:1px solid var(--line); margin-left:6px; color:var(--muted); }
+  .librow label { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--muted); white-space:nowrap; }
   .swatch { width:14px; height:14px; border-radius:50%; flex:none; border:2px solid #000; }
   label.btnlike { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); cursor:pointer; }
   label.check { display:flex; gap:8px; align-items:flex-start; margin:8px 0; }
@@ -139,6 +142,17 @@
   .vnums { display:grid; grid-template-columns: repeat(5, 1fr); gap:2px 12px; height:100%; align-content:center; }
   .vnums .label { font-size:10px; }
   .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
+  /* no Web Bluetooth (iPhone): no sensor or trainer controls, Play still works */
+  body.nobt header #btnHr, body.nobt header #btnTrainer, body.nobt header #btnCad, body.nobt header #ctlMode, body.nobt header #btnBrake { display:none; }
+  @media (max-height: 500px) {
+    body[data-mode=video] header { padding:4px 8px; gap:6px; }
+    body[data-mode=video] header button, body[data-mode=video] header select { padding:4px 10px; font-size:13px; }
+    body[data-mode=video] header h1 { display:none; }
+    .vnums .v { font-size:20px; }
+    .vnums .label { font-size:9px; }
+    .vnums .s { font-size:10px; min-height:11px; }
+    .vnums { gap:2px 8px; }
+  }
   .vnums .s { font-size:12px; color:var(--ghost); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .levelbox { display:none; position:absolute; z-index:14; right:2%; top:12%; width:320px; flex-direction:column; gap:8px; padding:12px;
     background:rgba(11,15,20,.85); border:1px solid var(--accent); border-radius:14px; font-size:14px; }
@@ -331,6 +345,16 @@
 <!-- ======================= dialogs ======================= -->
 <dialog id="dlgClips">
   <h2 style="margin-top:0">Ride videos</h2>
+  <div id="libBox">
+    <h3 style="margin:0 0 6px">Ride library</h3>
+    <div class="row" style="justify-content:flex-start; margin-top:0">
+      <button id="libOpen" class="primary">Open library</button>
+      <button id="libChoose">Choose library folder…</button>
+    </div>
+    <p id="libNote" class="muted">The ride videos (RideVideo_….mp4 from Ride Video Maker) in a folder and its subfolders, one per ride. Tick <b>validated</b> on the ones you've checked: they come first.</p>
+    <div id="libList" style="max-height:38vh; overflow:auto"></div>
+    <h3 style="margin:14px 0 6px">Other videos</h3>
+  </div>
   <p>Put each ride's video (360° equirectangular .mp4 from GoPro Player, or a normal video) and the watch's <b>.fit</b> (or Garmin Connect <b>.zip</b>) of the same ride in one folder. Videos are matched to rides by recording time, or else by the same file name.</p>
   <div class="row" style="justify-content:flex-start">
     <button id="vFolder" class="primary">Choose video folder…</button>

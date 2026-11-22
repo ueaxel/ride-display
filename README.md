@@ -125,3 +125,8 @@ The slider under the elevation profile (trainer and video screens) moves the gho
 ## Play the original ride
 
 **▶** next to the fast-forward slider (trainer and video screens) plays the original ride by itself at normal speed, from where the ghost is: video, map position, elevation dot, numbers (the original's power, heart rate, speed) and the team. Stops are left out (moving time). No trainer control, and nothing is saved. **⏸** (or Pause) stops it; the slider jumps it; **Start** then begins your own ride from that spot.
+
+## Ride library (Mac) and phone-size rides
+
+- **Clips → Ride library**: choose the folder that holds your rides once (e.g. *garmin*); every `RideVideo_….mp4` in it and its subfolders is listed, one per ride, named after its folder, with date, distance, climbing and riding time. **Ride this** opens it (full-resolution 360°, look around as before). Tick **validated** on rides you've checked: they're listed first. Chrome asks once per visit to read the folder again (**Open library**).
+- **Phone-size copy**: `Make Phone Version.command` (or `make_ride_video.py --phone RideVideo_….mp4`) makes `RideVideo_…_phone.mp4`: 2560 × 1280 H.264, about 2.7 GB per hour, same ride inside. Copy it onto the phone (iPhone: AirDrop → Save to Files), open the video screen (`#video`) in Safari, **Clips** → pick it, **▶** to play the ride. Turn the phone sideways. iPhones have no Web Bluetooth, so the sensor and trainer buttons are hidden there; Play, the map, the numbers and looking around (drag) work.

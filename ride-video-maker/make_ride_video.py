@@ -627,7 +627,95 @@ def build(folder, ride, used, dry_run=False):
     return out, meta
 
 
+# ----------------------------------------------------------------- phone-size copy
+
+def read_ride_meta(path):
+    """The ride data stored in a ride video (top-level uuid box), or None."""
+    size = path.stat().st_size
+    with open(path, 'rb') as f:
+        pos = 0
+        while pos + 8 <= size:
+            f.seek(pos)
+            h = f.read(16)
+            n, typ = struct.unpack('>I4s', h[:8])
+            head = 8
+            if n == 1:
+                n, head = struct.unpack('>Q', h[8:16])[0], 16
+            elif n == 0:
+                n = size - pos
+            if n < 8:
+                return None
+            if typ == b'uuid':
+                f.seek(pos + head)
+                body = f.read(n - head)
+                if body[:16] == RIDE_UUID:
+                    return json.loads(body[16:])
+            pos += n
+    return None
+
+
+PHONE_WIDTH, PHONE_BITRATE = 2560, '6M'
+
+
+def make_phone(src):
+    """A smaller copy of a ride video for a phone or tablet (no streaming needed:
+    copy it onto the device): 2560 x 1280, H.264 (plays on iPhone, Android,
+    any browser), about 2.7 GB per hour, same ride data inside."""
+    src = Path(src).expanduser().resolve()
+    meta = read_ride_meta(src)
+    if not meta:
+        raise SystemExit(f'{src.name} is not a ride video made by this tool (no ride inside).')
+    ff = ffmpeg_bin()
+    if not ff:
+        raise SystemExit('Needs ffmpeg. Install it once with:  brew install ffmpeg')
+    info = mp4_info(src)
+    out = src.with_name(src.stem.replace('_phone', '') + '_phone.mp4')
+    tmp = out.with_name(out.stem + '.partial.mp4')
+    w = min(PHONE_WIDTH, info.get('width') or PHONE_WIDTH)
+    h = w // 2 if (info.get('width') or 0) == 2 * (info.get('height') or 0) else -2
+    encs = subprocess.run([ff, '-hide_banner', '-encoders'], capture_output=True, text=True).stdout
+    tries = ([('h264_videotoolbox', ['-b:v', PHONE_BITRATE, '-profile:v', 'high'])] if 'h264_videotoolbox' in encs else []) + \
+            [('libx264', ['-preset', 'veryfast', '-crf', '23', '-maxrate', '8M', '-bufsize', '16M', '-profile:v', 'high'])]
+    say(f'Making a phone-size copy of {src.name} ({info["duration"] / 60:.0f} min of video) ...')
+    for enc, args in tries:
+        cmd = [ff, '-v', 'error', '-y', '-i', str(src), '-map', '0:v:0', '-map', '0:a:0?',
+               '-vf', f'scale={w}:{h}', '-c:v', enc, *args, '-pix_fmt', 'yuv420p',
+               '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', str(tmp)]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        shown = -1
+        for line in p.stdout:
+            if line.startswith('out_time_us='):
+                try:
+                    pct = int(int(line.split('=')[1]) / 1e6 / info['duration'] * 100)
+                except ValueError:
+                    continue
+                if pct >= shown + 10:
+                    shown = pct - pct % 10
+                    say(f'    {min(100, shown)} %')
+        err = p.stderr.read()
+        if p.wait() == 0:
+            break
+        say(f'    ({enc} did not work: {err.strip().splitlines()[-1] if err.strip() else "?"}; trying another way)')
+    else:
+        raise SystemExit('ffmpeg could not make the phone-size copy.')
+    meta = dict(meta, width=w, height=w // 2 if h == w // 2 else meta.get('height'), phoneCopyOf=src.name)
+    payload = RIDE_UUID + json.dumps(meta).encode()
+    with open(tmp, 'ab') as f:
+        f.write(struct.pack('>I4s', 8 + len(payload), b'uuid') + payload)
+    os.replace(tmp, out)
+    say(f'Done: {out.name} ({out.stat().st_size / 1e9:.2f} GB). Copy it to the phone (iPhone: AirDrop → save to Files), '
+        f'then in Ride Display (#video): Clips → pick it.')
+    return out
+
+
 def main():
+    if '--phone' in sys.argv:
+        files = [a for a in sys.argv[1:] if not a.startswith('--')]
+        if not files:
+            raise SystemExit('usage: make_ride_video.py --phone RideVideo_....mp4')
+        for f in files:
+            make_phone(f)
+        return
     argv, fit, rest = sys.argv[1:], None, []
     i = 0
     while i < len(argv):
