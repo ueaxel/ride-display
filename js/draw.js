@@ -40,29 +40,49 @@ function arrow(ctx, x, y, angle, size) {
   ctx.restore();
 }
 
-// Finger panning and zooming (enablePan): canvas._pv = { dx, dy, z } in CSS
-// pixels, applied on top of the map's own view, about the canvas centre.
+// Finger panning, zooming and turning (enablePan): canvas._pv = { dx, dy, z, r }
+// (CSS pixels, scale, radians clockwise), applied on top of the map's own view,
+// about the canvas centre.
 function panned(canvas, ctx, toScreen) {
   const v = canvas._pv;
-  if (!v || (!v.dx && !v.dy && v.z === 1)) return [toScreen, 1, 0];
-  const cx = ctx.w / 2, cy = ctx.h / 2;
-  return [(x, y) => { const [a, b] = toScreen(x, y); return [cx + (a - cx) * v.z + v.dx, cy + (b - cy) * v.z + v.dy]; }, v.z, Math.hypot(v.dx, v.dy)];
+  if (!isPanned(canvas)) return [toScreen, 1, 0, 0];
+  const cx = ctx.w / 2, cy = ctx.h / 2, c = Math.cos(v.r || 0) * v.z, sn = Math.sin(v.r || 0) * v.z;
+  return [(x, y) => { const [a, b] = toScreen(x, y), qx = a - cx, qy = b - cy; return [cx + qx * c - qy * sn + v.dx, cy + qx * sn + qy * c + v.dy]; },
+    v.z, Math.hypot(v.dx, v.dy), v.r || 0];
 }
-export function isPanned(canvas) { const v = canvas._pv; return !!v && (v.dx !== 0 || v.dy !== 0 || v.z !== 1); }
-export function resetPan(canvas) { canvas._pv = { dx: 0, dy: 0, z: 1, at: 0 }; }
+export function isPanned(canvas) { const v = canvas._pv; return !!v && (v.dx !== 0 || v.dy !== 0 || v.z !== 1 || (v.r || 0) !== 0); }
+export function resetPan(canvas) { canvas._pv = { dx: 0, dy: 0, z: 1, r: 0, at: 0 }; }
 
-// One finger drags the map, two fingers pinch-zoom (mouse: drag + wheel),
-// double-tap puts it back. onChange() redraws.
+// Small compass (top left) when the map isn't heading-up or north-up as drawn.
+function compass(ctx, north) {
+  const x = 26, y = 36;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(north);
+  ctx.beginPath(); ctx.arc(0, 0, 15, 0, 7); ctx.fillStyle = 'rgba(11,15,20,.75)'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(5, 2); ctx.lineTo(-5, 2); ctx.closePath(); ctx.fillStyle = C.red; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(5, 2); ctx.lineTo(-5, 2); ctx.closePath(); ctx.fillStyle = '#ccc'; ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = C.text; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText('N', x + Math.sin(north) * 22, y - Math.cos(north) * 22 + 4);
+}
+
+// One finger drags the map, two fingers pinch-zoom and turn it (mouse: drag,
+// wheel zooms, shift + wheel turns), double-tap puts it back. onChange() redraws.
 export function enablePan(canvas, onChange) {
   resetPan(canvas);
   canvas.style.touchAction = 'none';
   const pts = new Map();
   let moved = false, raf = 0, lastTap = 0;
   const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; onChange(); }); };
-  const zoomAt = (mx, my, f) => {
+  // zoom by f and turn by dr about screen point (mx, my), which stays put
+  const turnAt = (mx, my, f, dr) => {
     const v = canvas._pv, r = canvas.getBoundingClientRect();
-    const cx = r.width / 2, cy = r.height / 2, z2 = Math.max(0.2, Math.min(12, v.z * f));
-    v.dx = mx - cx - (mx - cx - v.dx) * z2 / v.z; v.dy = my - cy - (my - cy - v.dy) * z2 / v.z; v.z = z2;
+    const cx = r.width / 2, cy = r.height / 2, z2 = Math.max(0.2, Math.min(12, v.z * f)), r2 = (v.r || 0) + dr;
+    // unpanned point under (mx, my)
+    const ux = mx - cx - v.dx, uy = my - cy - v.dy, c0 = Math.cos(-(v.r || 0)) / v.z, s0 = Math.sin(-(v.r || 0)) / v.z;
+    const qx = ux * c0 - uy * s0, qy = ux * s0 + uy * c0;
+    const c1 = Math.cos(r2) * z2, s1 = Math.sin(r2) * z2;
+    v.dx = mx - cx - (qx * c1 - qy * s1); v.dy = my - cy - (qx * s1 + qy * c1); v.z = z2;
+    v.r = Math.abs(r2) < 0.03 ? 0 : r2;           // snaps back to straight
   };
   const local = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   canvas.addEventListener('pointerdown', e => {
@@ -77,12 +97,13 @@ export function enablePan(canvas, onChange) {
       if (!moved && Math.hypot(p[0] - ox, p[1] - oy) < 6) return;     // a tap, not a drag (yet)
       moved = true; v.dx += p[0] - ox; v.dy += p[1] - oy;
     } else if (pts.size === 2) {
-      const [a, b] = [...pts.values()];
-      const other = pts.get([...pts.keys()].find(k => k !== e.pointerId));
-      const d0 = Math.hypot(a[0] - b[0], a[1] - b[1]), d1 = Math.hypot(p[0] - other[0], p[1] - other[1]);
-      const m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], m1 = [(p[0] + other[0]) / 2, (p[1] + other[1]) / 2];
+      const prev = pts.get(e.pointerId), other = pts.get([...pts.keys()].find(k => k !== e.pointerId));
+      const d0 = Math.hypot(prev[0] - other[0], prev[1] - other[1]), d1 = Math.hypot(p[0] - other[0], p[1] - other[1]);
+      const a0 = Math.atan2(prev[1] - other[1], prev[0] - other[0]), a1 = Math.atan2(p[1] - other[1], p[0] - other[0]);
+      let da = a1 - a0; if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI;
+      const m0 = [(prev[0] + other[0]) / 2, (prev[1] + other[1]) / 2], m1 = [(p[0] + other[0]) / 2, (p[1] + other[1]) / 2];
       v.dx += m1[0] - m0[0]; v.dy += m1[1] - m0[1];
-      if (d0 > 10) zoomAt(m1[0], m1[1], d1 / d0);
+      if (d0 > 10) turnAt(m1[0], m1[1], d1 / d0, da);
       moved = true;
     }
     pts.set(e.pointerId, p); v.at = Date.now(); redraw();
@@ -99,21 +120,50 @@ export function enablePan(canvas, onChange) {
   canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    const [mx, my] = local(e);
-    zoomAt(mx, my, Math.pow(1.0015, -e.deltaY)); canvas._pv.at = Date.now(); redraw();
+    const [mx, my] = local(e), dy = e.deltaY || e.deltaX;
+    if (e.shiftKey) turnAt(mx, my, 1, dy * 0.003); else turnAt(mx, my, Math.pow(1.0015, -dy), 0);
+    canvas._pv.at = Date.now(); redraw();
   }, { passive: false });
+}
+
+// Where you are before the ride: green dot (blinking), a dashed line to the
+// nearest point of the route and how far it is. me = { x, y, near: {x, y} }.
+function drawMe(ctx, toScreen, me) {
+  const [mx, my] = toScreen(me.x, me.y);
+  if (me.near) {
+    const [nx, ny] = toScreen(me.near.x, me.near.y);
+    ctx.save(); ctx.setLineDash([6, 6]); ctx.lineWidth = 3; ctx.strokeStyle = C.green;
+    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(nx, ny); ctx.stroke(); ctx.restore();
+    dot(ctx, nx, ny, 6, '#fff', C.green);
+  }
+  const on = Math.floor(Date.now() / 500) % 2 === 0;
+  if (me.acc) {                                   // GPS accuracy circle
+    const [ex] = toScreen(me.x + me.acc, me.y), rr = Math.hypot(ex - mx, toScreen(me.x + me.acc, me.y)[1] - my);
+    if (rr > 12) { ctx.beginPath(); ctx.arc(mx, my, rr, 0, 7); ctx.fillStyle = 'rgba(74,232,88,.12)'; ctx.fill(); }
+  }
+  ctx.beginPath(); ctx.arc(mx, my, on ? 16 : 11, 0, 7); ctx.fillStyle = on ? 'rgba(74,232,88,.35)' : 'rgba(74,232,88,.15)'; ctx.fill();
+  dot(ctx, mx, my, 8, on ? C.green : '#2a8f35', '#fff');
 }
 
 // Route coloured by grade, with you and the ghost.
 //   view 'all'    - whole route, north up
 //   view 'follow' - heading up around you, `span` metres of road ahead
-export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null, trail = null, team = [] } = {}) {
+export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null, trail = null, team = [], me = null } = {}) {
   const ctx = fit(canvas);
   if (!ref) return message(ctx, 'Load a reference ride to see its route');
   if (!ref.hasRoute) return message(ctx, 'The reference ride has no GPS route');
   const P = ref.prof, n = ref.n, pad = 18;
   let toScreen, scale, cull = null;
-  if (view === 'all') {
+  if (view === 'locate' && !me) view = 'all';
+  if (view === 'locate') {                       // before the ride: you, the start and the nearest route point, north up
+    const xs = [me.x, P.x[0]], ys = [me.y, P.y[0]];
+    if (me.near) { xs.push(me.near.x); ys.push(me.near.y); }
+    const mx = (Math.min(...xs) + Math.max(...xs)) / 2, my = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const ext = Math.max(250, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    const s = Math.min(ctx.w - 2 * pad - 30, ctx.h - 2 * pad - 30) / ext;
+    toScreen = (x, y) => [ctx.w / 2 + s * (x - mx), ctx.h / 2 - s * (y - my)];
+    scale = s; cull = { cx: mx, cy: my, r: Math.hypot(ctx.w, ctx.h) / s };
+  } else if (view === 'all') {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (let i = 0; i < n; i++) { x0 = Math.min(x0, P.x[i]); x1 = Math.max(x1, P.x[i]); y0 = Math.min(y0, P.y[i]); y1 = Math.max(y1, P.y[i]); }
     const s = Math.min((ctx.w - 2 * pad) / Math.max(1, x1 - x0), (ctx.h - 2 * pad) / Math.max(1, y1 - y0));
@@ -133,8 +183,9 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
     scale = s; cull = { cx, cy, r: Math.hypot(ctx.w, ctx.h) / s };
   }
   {
-    const [T, z, off] = panned(canvas, ctx, toScreen);
-    if (z !== 1 || off) { toScreen = T; scale *= z; if (cull) cull.r = (Math.hypot(ctx.w, ctx.h) + 2 * off) / scale; }
+    const [T, z, off, rot] = panned(canvas, ctx, toScreen);
+    if (z !== 1 || off || rot) { toScreen = T; scale *= z; if (cull) cull.r = (Math.hypot(ctx.w, ctx.h) + 2 * off) / scale; }
+    var turned = rot;
   }
   canvas._toScreen = toScreen;                 // for clicks on the map (video sync)
   if (streets) {
@@ -191,7 +242,18 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
     if (view === 'all') {
       const [ax, ay] = toScreen(...ref.xy(Math.min(ref.total, you + 30)));
       arrow(ctx, yx, yy, Math.atan2(ax - yx, yy - ay), 11);
-    } else arrow(ctx, yx, yy, 0, 16);
+    } else if (view === 'follow') arrow(ctx, yx, yy, turned, 16);
+  }
+  if (me) drawMe(ctx, toScreen, me);
+  if (view !== 'follow' || turned) {
+    const [nx, ny] = toScreen(P.x[0], P.y[0]), [ux, uy] = toScreen(P.x[0], P.y[0] + 100);
+    compass(ctx, Math.atan2(ux - nx, ny - uy));
+  }
+  if (view === 'locate') {                       // start flag
+    const [fx, fy] = toScreen(P.x[0], P.y[0]);
+    ctx.fillStyle = '#000'; ctx.fillRect(fx - 1, fy - 26, 3, 26);
+    ctx.fillStyle = '#fff'; ctx.fillRect(fx + 2, fy - 26, 34, 14);
+    ctx.fillStyle = '#000'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'left'; ctx.fillText('START', fx + 4, fy - 15);
   }
 }
 
@@ -405,7 +467,7 @@ export function drawFreeMap(canvas, streets, { you = null, heading = 0, trail = 
   if (!you) return message(ctx, note || 'Waiting for GPS…');
   const s = (ctx.h * (anchor - 0.08)) / span, sx = ctx.w / 2, sy = ctx.h * anchor;
   const c = Math.cos(heading), sn = Math.sin(heading);
-  const [toScreen, z, off] = panned(canvas, ctx, (x, y) => { const dx = x - you[0], dy = y - you[1]; return [sx + s * (dx * c - dy * sn), sy - s * (dx * sn + dy * c)]; });
+  const [toScreen, z, off, rot] = panned(canvas, ctx, (x, y) => { const dx = x - you[0], dy = y - you[1]; return [sx + s * (dx * c - dy * sn), sy - s * (dx * sn + dy * c)]; });
   if (streets) {
     ctx.labelZone = labelZone;
     drawStreets(ctx, streets, toScreen, s * z, { cx: you[0], cy: you[1], r: (Math.hypot(ctx.w, ctx.h) + 2 * off) / (s * z) });
@@ -424,7 +486,8 @@ export function drawFreeMap(canvas, streets, { you = null, heading = 0, trail = 
     }
   }
   const [ax, ay] = toScreen(you[0], you[1]);
-  arrow(ctx, ax, ay, 0, 16);
+  arrow(ctx, ax, ay, rot, 16);
+  if (rot) compass(ctx, rot - heading);
 }
 
 // A stretch ridden back and forth (refedit.findTurnBacks): the route around it,

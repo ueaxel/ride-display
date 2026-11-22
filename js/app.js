@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '40 · 261122_1125 (move the map with your finger)';
+export const APP_VERSION = '41 · 261122_1140 (turn the map, your GPS dot before the ride)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -469,6 +469,22 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
     }
     D.drawFreeMap($('gmap'), area.streets, { you: me, heading, trail, span: riding ? ghostSpan * 1.3 : ghostSpan,
       anchor: riding ? 0.64 : 0.72, labelZone: riding ? [0.3, 0.7] : null, note: links.gps ? '' : 'Tap GPS to see where you are' });
+    return;
+  }
+  // before the ride, with GPS: where you are, the route start and the nearest
+  // point of the route (to find the start, or the best place to join the route)
+  const fixNow = Date.now() - live.tFix < 10000 ? live.fix : null;
+  if (!running && !t && fixNow && matcher) {
+    const [mx, my] = matcher.toXY(fixNow.lat, fixNow.lon);
+    const nr = matcher.nearest(mx, my, 0, ref.n);
+    const P = ref.prof, f = nr ? (nr.dist - P.d[nr.i]) / Math.max(1e-6, P.d[nr.i + 1] - P.d[nr.i]) : 0;
+    const near = nr ? { x: P.x[nr.i] + f * (P.x[nr.i + 1] - P.x[nr.i]), y: P.y[nr.i] + f * (P.y[nr.i + 1] - P.y[nr.i]) } : null;
+    const toStart = Math.hypot(mx - P.x[0], my - P.y[0]);
+    const fmtD = m => m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
+    $('gGapS').textContent = toStart <= 40 ? 'You are at the start: press Start'
+      : nr && nr.off <= 40 ? `On the route at km ${(nr.dist / 1000).toFixed(1)} · start ${fmtD(toStart)} away`
+      : `Start ${fmtD(toStart)} away` + (nr && nr.dist > 100 && nr.off < toStart - 50 ? ` · route ${fmtD(nr.off)} away (at km ${(nr.dist / 1000).toFixed(1)})` : '');
+    D.drawRoute($('gmap'), ref, { view: 'locate', streets, me: { x: mx, y: my, acc: fixNow.acc, near: nr && nr.off > 15 ? near : null }, anchor: 0.78 });
     return;
   }
   D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets, trail: refTrail, team: teamAt(clock.seconds),
@@ -1046,6 +1062,7 @@ document.body.classList.toggle('nobt', !bluetoothAvailable());
 if (!bluetoothAvailable() && !(window.isSecureContext && mode === 'video')) banner(window.isSecureContext ? 'This browser has no Web Bluetooth — use Chrome on Android, Mac or Windows.' : 'Open this page over https:// so Bluetooth and GPS can work.');
 keepScreenOn();
 setInterval(tick, 1000);
+setInterval(() => { if (mode === 'ghost' && !running && ref && live.fix && Date.now() - live.tFix < 10000 && !document.hidden) render(); }, 500);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
