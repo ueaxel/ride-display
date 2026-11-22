@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '32 (21 Nov 2026, rides with zero power are estimated)';
+export const APP_VERSION = '33 (21 Nov 2026, coasting downhill)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -139,11 +139,17 @@ function tick() {
 
   let moving, dist, speed, fix = null;
   if (indoorMode()) {
-    moving = clock.tick(power > 0 || cadence > 0 ? 9 : 0);
+    // The virtual bike keeps rolling when you stop pedaling, as a real one:
+    // downhill it picks up speed by itself (elevation -> speed), on the flat
+    // it slows down. Once it has come to a stop it stays there until you
+    // pedal again (no rolling away from a standstill); Brake stops it sooner.
+    const pedaling = power > 0 || cadence > 0;
     const before = indoor.dist;
     if (braking && indoor.speed < 0.5 && power > 40) setBrake(false);          // stopped and pedaling again: brake off
-    if (moving || braking) indoor.step(moving ? power : 0, 1, ref ? ref.gradeFraction(indoor.dist) : 0, braking);
-    dist = indoor.dist; speed = moving ? indoor.speed : 0;
+    if (pedaling || indoor.speed > 0.3) indoor.step(pedaling ? power : 0, 1, ref ? ref.gradeFraction(indoor.dist) : 0, braking);
+    if (!pedaling && indoor.speed <= 0.3) indoor.speed = 0;
+    moving = clock.tick(pedaling || indoor.speed > 0.3 ? 9 : 0);
+    dist = indoor.dist; speed = indoor.speed;
     odo += dist - before;
   } else {
     fix = now - live.tFix < 5000 ? live.fix : null;
