@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '34 (21 Nov 2026, team rides)';
+export const APP_VERSION = '35 (21 Nov 2026, fast-forward slider)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -330,7 +330,7 @@ function render() {
   if (!S || quiet) return;
   const t = clock.seconds;
   const you = ref ? Math.min(pos, ref.total) : null;
-  const ghost = ref && running ? Math.min(ref.total, ref.distAtTime(t - offset)) : (ref ? 0 : null);
+  const ghost = ref ? Math.min(ref.total, Math.max(0, ref.distAtTime(t - offset))) : null;
   const gapM = last(S.gapM), gapS = finished ? finished.gapS : last(S.gapS);
   const hr = Date.now() - live.tHr < 5000 ? live.hr : null;
   const startBtns = [$('btnStart'), $('gStart')];
@@ -342,6 +342,7 @@ function render() {
   // phone while riding: map fills the screen, numbers float on top, top bar hidden
   const ridingNow = mode === 'ghost' && running && !finished;
   if (document.body.classList.contains('riding') !== ridingNow) document.body.classList.toggle('riding', ridingNow);
+  syncSliders(ghost);
   if (mode === 'trainer') renderTrainer(t, you, ghost, gapM, gapS, hr);
   else if (mode === 'video') video?.render({ t, you, ghost, gapM, gapS, hr });
   else renderGhost(t, you, ghost, gapM, gapS, hr);
@@ -356,7 +357,9 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   $('tSpeed').textContent = S.speed.length ? (last(S.speed) * 3.6).toFixed(1) : '–';
   $('tTime').textContent = fmtTime(t);
   $('tState').textContent = !running ? (t ? 'stopped' : 'press Start') : finished ? 'reference distance reached' : clock.now - clock.lastMove > 3 ? 'paused' : 'riding';
-  $('tDist').textContent = ((last(S.dist) ?? 0) / 1000).toFixed(2);
+  // where you are on the route (after a fast forward that differs from what you've ridden)
+  const ridden = last(S.dist) ?? 0;
+  $('tDist').textContent = ((you ?? ridden) / 1000).toFixed(2);
   const rp = last(S.refPower), rh = last(S.refHr);
   const ctl = links.trainer?.control;
   const ghostTxt = ref && ref.hasPower && rp != null ? `ghost ${Math.round(rp)} W${ref.prof.powerEstimated ? ' (est.)' : ''}` : '';
@@ -372,7 +375,7 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   $('fixedW').textContent = `${fixedW} W`;
   $('tHrRef').textContent = rh ? `ghost ${Math.round(rh)} bpm` : '';
   $('tSpeedRef').textContent = ref && you != null ? `ghost ${ref.at('v', you).toFixed(1)} km/h` : 'km/h on the route';
-  $('tDistRef').textContent = ref ? `of ${(ref.total / 1000).toFixed(2)} km` : 'km';
+  $('tDistRef').textContent = ref ? `of ${(ref.total / 1000).toFixed(2)} km` + (you != null && Math.abs(you - ridden) > 50 ? ` · ridden ${(ridden / 1000).toFixed(2)}` : '') : 'km';
   const g = $('tGap');
   if (ref && finished) {
     g.innerHTML = `${sign(gapS)}<span class="unit">s</span>`; g.className = 'v ' + (gapS >= 0 ? 'good' : 'bad');
@@ -458,6 +461,39 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
 
 // ------------------------------------------------------------------ actions
 
+// ------------------------------------------------------------------ fast forward
+// The slider under the elevation profile moves the ghost along the route;
+// the team follows (same clock, their stops smoothed out like the ghost's).
+// "me too" (trainer and video screens) takes you to the same spot, so you
+// skip ahead together.
+function jumpGhostTo(d, moveMe) {
+  if (!ref) return;
+  d = Math.max(0, Math.min(ref.total, d));
+  offset = clock.seconds - ref.timeAt(d);
+  if (moveMe && indoorMode()) { indoor.dist = d; pos = d; }
+  if (S.gapM.length) { S.gapM[S.gapM.length - 1] = pos - d; S.gapS[S.gapS.length - 1] = ref.timeAt(Math.min(pos, ref.total)) - ref.timeAt(d); }
+  finished = null;
+  ctlSent = { v: null, at: 0 };
+  render();
+}
+function syncSliders(ghost) {
+  for (const id of ['ffT', 'ffV']) {
+    const el = $(id);
+    if (!el || el.matches(':active') || el.dataset.drag) continue;
+    el.disabled = !ref;
+    el.value = ref && ghost != null ? Math.round(1000 * ghost / ref.total) : 0;
+    $(id + 'l').textContent = ref && ghost != null ? `${(ghost / 1000).toFixed(2)} km` : '';
+  }
+}
+for (const id of ['ffT', 'ffV']) {
+  const el = $(id);
+  el.addEventListener('input', () => { el.dataset.drag = '1'; if (ref) $(id + 'l').textContent = `${(el.value / 1000 * ref.total / 1000).toFixed(2)} km`; });
+  el.addEventListener('change', () => {
+    delete el.dataset.drag;
+    if (ref) jumpGhostTo(el.value / 1000 * ref.total, el.parentElement.querySelector('.ffMe').checked);
+  });
+}
+
 // ------------------------------------------------------------------ team rides
 // More rides of the same route as extra ghosts (dots on the map and the
 // elevation profile). The numbers stay those of the reference ghost.
@@ -466,7 +502,7 @@ function teamOf(r = ref) { return r ? (store.get('teams', {})[r.name] || []) : [
 function saveTeam(list, r = ref) { const all = store.get('teams', {}); all[r.name] = list; return store.set('teams', all); }
 // positions of the team at moving time t (same clock and Reset-gap offset as the ghost)
 function teamAt(t) {
-  const sec = running || finished ? t - offset : 0;
+  const sec = t - offset;
   return teamOf().map(m => ({ d: Math.min(ref.total, memberAt(m, sec)), color: m.color, name: m.name }));
 }
 
@@ -935,4 +971,4 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // for tests: run n seconds at once
-window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video, area, trail, refTrail, offset, outPower, settings, refs }; }, resync, restoreRide, newRide, showRides, getArea, selectRef, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };
+window.__rideDisplay = { fastForward(n) { quiet = true; for (let i = 0; i < n; i++) tick(); quiet = false; render(); }, setMode, toggleDemo, toggleStart, get state() { return { S, ref, steps, clock, pos, odo, video, area, trail, refTrail, offset, outPower, settings, refs }; }, resync, restoreRide, newRide, teamAt: () => (ref ? teamAt(clock.seconds) : []), showRides, getArea, selectRef, buildFit: () => Array.from(buildFit(S, { indoor: indoorMode() })), links, live, setCtlMode };

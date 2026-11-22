@@ -412,7 +412,7 @@ export function initVideoScreen(api) {
       else { set('vWork', '–'); set('vWorkS', ''); }
       set('vSpeed', S.speed.length && api.running ? (api.last(S.speed) * 3.6).toFixed(1) : '–');
       set('vTime', api.fmtTime(t));
-      set('vDist', (api.odo / 1000).toFixed(2));
+      set('vDist', ((you ?? api.odo) / 1000).toFixed(2));                     // where you are on the route
       const g = $('vGap');
       if (api.ref && gapM != null) { g.textContent = `${api.sign(gapM)} m`; g.className = 'v ' + api.gapClass(gapM); set('vGapS', `${api.sign(gapS)} s`); }
       else { g.textContent = '–'; g.className = 'v'; set('vGapS', ''); }

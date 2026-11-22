@@ -117,3 +117,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 ## Team rides
 
 **☰ → Team rides** adds more rides of the same route (.fit or .zip, several at once) to the current reference. Each one races along as a coloured dot on the map and the elevation profile, on all screens; the numbers (gap, power, work) stay those of the reference ghost. A team ride starts where it passes the reference's start, is laid onto the reference route (detours hold its position), uses the same clock as the ghost (Reset gap moves them all), and gets its stops smoothed out like the reference. Rides of another route are refused.
+
+## Fast forward
+
+The slider under the elevation profile (trainer and video screens) moves the ghost along the route; the team rides move with it, on the same clock, with their stops smoothed out. With **me too** ticked you go to the same spot (gap 0), so you can skip a part of the ride together; untick it to move only the ghost and the team. The distance shown is then where you are on the route, with the distance actually ridden beside it.

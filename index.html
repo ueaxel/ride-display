@@ -55,6 +55,12 @@
     grid-template-areas: "map scatter scatter" "map trace steps"; }
   #pMap { grid-area:map; } #pScatter { grid-area:scatter; } #pTrace { grid-area:trace; } #pSteps { grid-area:steps; }
   #elev { height:90px; flex:none; margin-top:8px; }
+  .ffrow { display:flex; align-items:center; gap:8px; flex:none; font-size:12px; color:var(--muted); }
+  .ff { flex:1; min-width:0; accent-color:var(--ghost); }
+  .ffme { display:flex; align-items:center; gap:3px; white-space:nowrap; }
+  .ffl { min-width:4.5em; text-align:right; font-variant-numeric:tabular-nums; }
+  .elevbody { display:flex; flex-direction:column; }
+  .elevbody canvas { flex:1; min-height:0; width:100%; }
   .stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:4px 10px; font-size:13px; margin-bottom:6px; }
   .stats b { display:block; font-size:20px; font-variant-numeric: tabular-nums; }
   @media (max-width: 1100px) {
@@ -232,7 +238,8 @@
   </div>
   <div class="board">
     <section class="panel" id="pMap"><h3>Route <span class="right"><button id="btnMapView">Follow</button></span></h3>
-      <div class="grow"><canvas id="map"></canvas></div><canvas id="elev"></canvas></section>
+      <div class="grow"><canvas id="map"></canvas></div><canvas id="elev"></canvas>
+      <div class="ffrow"><input type="range" class="ff" id="ffT" min="0" max="1000" step="1" value="0" title="Move the ghost (and the team) along the route"><label class="ffme"><input type="checkbox" class="ffMe" checked> me too</label><span class="ffl" id="ffTl"></span></div></section>
     <section class="panel" id="pScatter"><h3>Heart rate vs power <span class="right"><button id="btnAvg">10 s</button></span></h3>
       <div class="grow"><canvas id="scatter"></canvas></div></section>
     <section class="panel" id="pTrace"><h3><span style="color:var(--teal)">Power</span> &amp; <span style="color:var(--hr)">heart rate</span> <span class="ref" style="text-transform:none">· ghost dashed</span>
@@ -291,7 +298,8 @@
       <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
     </div></div><div class="grip"></div></section>
   <section class="float" data-panel="elev"><div class="fhead">Elevation, whole ride<button class="fclose" title="Hide">×</button></div>
-    <div class="fbody"><canvas id="vElev"></canvas></div><div class="grip"></div></section>
+    <div class="fbody elevbody"><canvas id="vElev"></canvas>
+      <div class="ffrow"><input type="range" class="ff" id="ffV" min="0" max="1000" step="1" value="0" title="Move the ghost (and the team) along the route"><label class="ffme"><input type="checkbox" class="ffMe" checked> me too</label><span class="ffl" id="ffVl"></span></div></div><div class="grip"></div></section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vMap"></canvas><div id="vMapInfo" class="mapinfo"></div></div><div class="grip"></div></section>
   <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>
