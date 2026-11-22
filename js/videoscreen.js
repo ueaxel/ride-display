@@ -9,7 +9,8 @@ import { downloadStreets, saveStreets, loadStreets } from './streets.js';
 import * as D from './draw.js';
 
 const DEFAULT_LAYOUT = {
-  numbers: { x: 0.012, y: 0.085, w: 0.36, h: 0.17, on: true },
+  numbers: { x: 0.012, y: 0.085, w: 0.44, h: 0.17, on: true },
+  elev: { x: 0.735, y: 0.395, w: 0.255, h: 0.115, on: true },
   map: { x: 0.735, y: 0.52, w: 0.255, h: 0.46, on: true },
   scatter: { x: 0.012, y: 0.6, w: 0.27, h: 0.38, on: true },
   trace: { x: 0.30, y: 0.76, w: 0.42, h: 0.22, on: false },
@@ -26,6 +27,7 @@ export function initVideoScreen(api) {
   const follower = new VideoFollower(view);
   let clips = [], net = null, cur = -1, choices = [], dirHandle = null, syncing = false, mapWhole = false;
   let layout = { ...DEFAULT_LAYOUT, ...store.get('videoLayout', {}) };
+  if (!store.get('videoLayout', {}).elev) layout.numbers = { ...layout.numbers, w: Math.max(layout.numbers.w, 0.44) };   // room for the new numbers
   const savedView = store.get('videoView', null);
   if (savedView) Object.assign(view, savedView);
   view.onViewChange = () => store.set('videoView', { yaw: view.yaw, pitch: view.pitch, fov: view.fov });
@@ -60,7 +62,7 @@ export function initVideoScreen(api) {
   function fillPanelMenu() {
     const box = $('vPanelList');
     box.innerHTML = '';
-    for (const [name, label] of [['numbers', 'Numbers'], ['map', 'Map'], ['scatter', 'HR vs power'], ['trace', 'Power & HR over time']]) {
+    for (const [name, label] of [['numbers', 'Numbers'], ['elev', 'Elevation'], ['map', 'Map'], ['scatter', 'HR vs power'], ['trace', 'Power & HR over time']]) {
       const b = document.createElement('button');
       b.textContent = (layout[name].on ? '✓ ' : '') + label;
       b.onclick = () => { layout[name] = { ...layout[name], on: !layout[name].on }; panels.forEach(place); saveLayout(); fillPanelMenu(); draw(); };
@@ -384,18 +386,38 @@ export function initVideoScreen(api) {
     if (layout.numbers.on) {
       const p3 = api.avgLast(S.power, 3), fresh = Date.now() - live.tPower < 3000;
       const set = (id, v) => { $(id).textContent = v; };
-      set('vPower', api.running && p3 != null ? Math.round(p3) : fresh ? Math.round(live.power ?? 0) : '–');
+      const myP = api.running && p3 != null ? Math.round(p3) : fresh ? Math.round(live.power ?? 0) : null;
+      // power: what the trainer is set to (ERG), else what you push
+      const ctl = api.links.trainer?.control, last = ctl?.last;
+      if (last && last.kind === 'power' && last.ok && api.ctlMode !== 'off') {
+        set('vPowerLabel', 'Trainer set, W'); set('vPower', Math.round(last.value)); set('vTarget', myP != null ? `you ${myP} W` : '');
+      } else {
+        set('vPowerLabel', 'Power, W'); set('vPower', myP ?? '–');
+        set('vTarget', api.ref?.hasPower && you != null ? `ghost ${Math.round(api.ref.at('p', Math.min(you, api.ref.total)))} W` : '');
+      }
+      // grade under your wheels (the reference route at your position)
+      const gr = api.ref && api.ref.hasAlt && you != null ? api.ref.gradeFraction(Math.min(you, api.ref.total)) * 100 : null;
+      set('vGrade', gr != null ? `${gr >= 0 ? '' : '−'}${Math.abs(gr).toFixed(1)} %` : '–');
+      set('vGradeS', last && last.kind === 'grade' && last.ok ? `trainer ${(last.value * 100).toFixed(1)} %` : api.braking ? 'braking' : '');
+      // cadence from the trainer (the cadence sensor if the trainer gives none)
+      const sensorFresh = Date.now() - (live.tCad || 0) < 3000;
+      if (fresh && live.cadence != null) { set('vCad', Math.round(live.cadence)); set('vCadS', sensorFresh ? `sensor ${live.cadSensor}` : 'rpm'); }
+      else if (sensorFresh) { set('vCad', live.cadSensor); set('vCadS', 'sensor'); }
+      else { set('vCad', '–'); set('vCadS', ''); }
       set('vHr', hr ?? '–');
-      set('vCad', fresh && live.cadence != null ? Math.round(live.cadence) : '–');
+      const rh = api.last(S.refHr); set('vHrS', rh ? `ghost ${Math.round(rh)}` : '');
+      // energy: what you've put in so far minus what the original rider had at this spot
+      const w = api.workVsGhost(you);
+      if (w) { $('vWork').textContent = `${w.used >= 0 ? '+' : '−'}${Math.abs(w.used).toFixed(1)} kJ`; set('vWorkS', `ghost ${Math.round(w.ref)} kJ here`); }
+      else { set('vWork', '–'); set('vWorkS', ''); }
       set('vSpeed', S.speed.length && api.running ? (api.last(S.speed) * 3.6).toFixed(1) : '–');
       set('vTime', api.fmtTime(t));
       set('vDist', (api.odo / 1000).toFixed(2));
       const g = $('vGap');
       if (api.ref && gapM != null) { g.textContent = `${api.sign(gapM)} m`; g.className = 'v ' + api.gapClass(gapM); set('vGapS', `${api.sign(gapS)} s`); }
       else { g.textContent = '–'; g.className = 'v'; set('vGapS', ''); }
-      const ctl = api.links.trainer?.control;
-      set('vTarget', api.ctlMode !== 'off' && ctl ? ctl.message : (api.ref?.hasPower && you != null ? `ghost ${Math.round(api.ref.at('p', you))} W` : ''));
     }
+    if (layout.elev.on) D.drawElevationPlain($('vElev'), api.ref, you, ghost);
     const c = clips[cur];
     const vidAt = c && c.ref === api.ref && view.ready ? c.distAtVideo(view.video.currentTime) : null;
     if (layout.map.on) {

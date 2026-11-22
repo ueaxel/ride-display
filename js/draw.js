@@ -122,6 +122,33 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   }
 }
 
+// The whole ride's elevation, plain (see-through grey over the video), with
+// dots for you and the ghost riding along it.
+export function drawElevationPlain(canvas, ref, you = null, ghost = null) {
+  const ctx = fit(canvas);
+  if (!ref || !ref.hasAlt) return message(ctx, ref ? 'No altitude in this ride' : '');
+  const P = ref.prof, n = ref.n;
+  let a0 = Infinity, a1 = -Infinity;
+  for (const a of P.a) { a0 = Math.min(a0, a); a1 = Math.max(a1, a); }
+  a1 = Math.max(a1, a0 + 20);
+  const L = 6, R = 6, T = 8, B = 14;
+  const X = d => L + (ctx.w - L - R) * d / ref.total, Y = a => ctx.h - B - (ctx.h - T - B) * (a - a0) / (a1 - a0);
+  const step = Math.max(1, Math.floor(n / (ctx.w - L - R)));
+  ctx.beginPath(); ctx.moveTo(X(0), ctx.h - B);
+  for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), Y(P.a[i]));
+  ctx.lineTo(X(ref.total), Y(P.a[n - 1])); ctx.lineTo(X(ref.total), ctx.h - B); ctx.closePath();
+  ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#C9D1DC'; ctx.font = '11px system-ui'; ctx.textAlign = 'left';
+  ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
+  ctx.fillText(`${Math.round(a0)}–${Math.round(a1)} m`, L, ctx.h - 2);
+  ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, ctx.w - R, ctx.h - 2);
+  ctx.shadowBlur = 0;
+  const at = d => { d = Math.max(0, Math.min(ref.total, d)); return [X(d), Y(ref.at('a', d))]; };
+  if (ghost != null) { const [x, y] = at(ghost); dot(ctx, x, y, 6, C.ghost); }
+  if (you != null) { const [x, y] = at(you); dot(ctx, x, y, 6, '#FFFFFF'); }
+}
+
 // Elevation profile with you and the ghost.
 export function drawElevation(canvas, ref, you = null, ghost = null) {
   const ctx = fit(canvas);
@@ -159,6 +186,26 @@ function axes(ctx, box, xr, yr, xlab, ylab) {
   ctx.save(); ctx.translate(13, (T + B) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylab, 0, 0); ctx.restore();
 }
 
+// Axes with a line at every multiple of xs / ys (labels thinned out when crowded).
+function gridAxes(ctx, box, xr, xs, yr, ys, xlab, ylab) {
+  const { L, R, T, B } = box;
+  ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.fillStyle = C.muted; ctx.font = '12px system-ui';
+  const nx = Math.round((xr[1] - xr[0]) / xs), ny = Math.round((yr[1] - yr[0]) / ys);
+  const xEvery = Math.max(1, Math.ceil(nx / Math.max(2, (R - L) / 45))), yEvery = Math.max(1, Math.ceil(ny / Math.max(2, (B - T) / 18)));
+  for (let j = 0; j <= nx; j++) {
+    const v = xr[0] + j * xs, x = L + (R - L) * j / nx;
+    ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, B); ctx.stroke();
+    if (j % xEvery === 0) { ctx.textAlign = 'center'; ctx.fillText(Math.round(v), x, B + 15); }
+  }
+  for (let j = 0; j <= ny; j++) {
+    const v = yr[0] + j * ys, y = B - (B - T) * j / ny;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(R, y); ctx.stroke();
+    if (j % yEvery === 0) { ctx.textAlign = 'right'; ctx.fillText(Math.round(v), L - 6, y + 4); }
+  }
+  ctx.textAlign = 'center'; ctx.fillText(xlab, (L + R) / 2, B + 31);
+  ctx.save(); ctx.translate(13, (T + B) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylab, 0, 0); ctx.restore();
+}
+
 const nice = (lo, hi, step) => [Math.floor(lo / step) * step, Math.ceil(hi / step) * step];
 
 // HR against power. Points fade with age (like the watch); the current point is yellow.
@@ -174,10 +221,10 @@ export function drawScatter(canvas, power, hr, now, { avg = 10 } = {}) {
   if (pts.length < 5) return message(ctx, 'HR vs power appears once you ride');
   let p1 = 100, h0 = 250, h1 = 0;
   for (const [p, h] of pts) { p1 = Math.max(p1, p); h0 = Math.min(h0, h); h1 = Math.max(h1, h); }
-  const xr = nice(0, p1 * 1.05, 50), yr = nice(h0 - 3, h1 + 3, 10);
-  xr.fmt = v => Math.round(v);
+  // grid lines on round numbers: every 50 W and every 20 bpm
+  const xr = nice(0, p1 * 1.05, 50), yr = nice(h0 - 3, h1 + 3, 20);
   const box = { L: 46, R: ctx.w - 12, T: 10, B: ctx.h - 38 };
-  axes(ctx, box, xr, yr, `Power, ${avg}-s average (W)`, 'Heart rate (bpm)');
+  gridAxes(ctx, box, xr, 50, yr, 20, `Power, ${avg}-s average (W)`, 'Heart rate (bpm)');
   const X = p => box.L + (box.R - box.L) * (p - xr[0]) / (xr[1] - xr[0]);
   const Y = h => box.B - (box.B - box.T) * (h - yr[0]) / (yr[1] - yr[0]);
   for (const [p, h, i] of pts) {

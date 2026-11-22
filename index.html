@@ -127,7 +127,7 @@
   .grip { position:absolute; right:0; bottom:0; width:18px; height:18px; cursor:nwse-resize; touch-action:none;
     background: linear-gradient(135deg, transparent 50%, rgba(255,255,255,.35) 50%); border-bottom-right-radius:14px; }
   body.chromeless .fhead, body.chromeless .grip { opacity:0; }
-  .vnums { display:grid; grid-template-columns: repeat(4, 1fr); gap:2px 12px; height:100%; align-content:center; }
+  .vnums { display:grid; grid-template-columns: repeat(5, 1fr); gap:2px 12px; height:100%; align-content:center; }
   .vnums .label { font-size:10px; }
   .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
   .vnums .s { font-size:12px; color:var(--ghost); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -278,14 +278,18 @@
   <div class="vmsg" id="vMsg"></div>
   <section class="float" data-panel="numbers"><div class="fhead">Ride<button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><div class="vnums">
-      <div><div class="label">Power</div><div class="v" id="vPower">–</div><div class="s" id="vTarget"></div></div>
-      <div><div class="label">Heart rate</div><div class="v" id="vHr">–</div><div class="s"></div></div>
-      <div><div class="label">Cadence</div><div class="v" id="vCad">–</div><div class="s"></div></div>
+      <div><div class="label" id="vPowerLabel">Trainer set, W</div><div class="v" id="vPower">–</div><div class="s" id="vTarget"></div></div>
+      <div><div class="label">Grade</div><div class="v" id="vGrade">–</div><div class="s" id="vGradeS"></div></div>
+      <div><div class="label">Cadence</div><div class="v" id="vCad">–</div><div class="s" id="vCadS"></div></div>
+      <div><div class="label">Heart rate</div><div class="v" id="vHr">–</div><div class="s" id="vHrS"></div></div>
+      <div><div class="label">Work vs ghost</div><div class="v" id="vWork">–</div><div class="s" id="vWorkS"></div></div>
       <div><div class="label">Speed</div><div class="v" id="vSpeed">–</div><div class="s">km/h</div></div>
       <div><div class="label">Time</div><div class="v" id="vTime">0:00</div><div class="s"></div></div>
       <div><div class="label">Distance</div><div class="v" id="vDist">0.00</div><div class="s">km</div></div>
       <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
     </div></div><div class="grip"></div></section>
+  <section class="float" data-panel="elev"><div class="fhead">Elevation, whole ride<button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><canvas id="vElev"></canvas></div><div class="grip"></div></section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vMap"></canvas><div id="vMapInfo" class="mapinfo"></div></div><div class="grip"></div></section>
   <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>

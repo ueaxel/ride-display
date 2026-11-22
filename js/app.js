@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '29 (21 Nov 2026, brake, trainer stops with the ride)';
+export const APP_VERSION = '30 (21 Nov 2026, video numbers, elevation panel)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -450,6 +450,18 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
 
 // ------------------------------------------------------------------ actions
 
+// Work vs the ghost at your spot (kJ), for any route (also video clips):
+// used = your energy so far minus the original rider's at the same distance.
+const workCache = new WeakMap();
+function workVsGhost(you) {
+  if (!ref || !ref.hasPower || you == null || !running) return null;
+  if (!workCache.has(ref)) workCache.set(ref, workProfile(ref.prof));
+  const W = workCache.get(ref), st = ref.prof.step, d = Math.min(you, ref.total);
+  const i = Math.max(0, Math.min(W.length - 2, Math.floor(d / st))), f = Math.max(0, Math.min(1, (d - ref.prof.d[i]) / st));
+  const wr = (W[i] + (W[i + 1] - W[i]) * f) / 1000;
+  return { used: (last(S.work) ?? 0) / 1000 - wr, ref: wr };
+}
+
 function interpW(d) {
   const st = ref.prof.step, i = Math.max(0, Math.min(refWork.length - 2, Math.floor(d / st)));
   const f = Math.max(0, Math.min(1, (d - ref.prof.d[i]) / st));
@@ -853,6 +865,7 @@ video = initVideoScreen({
   get ctlMode() { return ctlMode; }, get rider() { return rider; },
   // position now, between the 1-s ticks (smooth video)
   posNow() { return live.moving && running && !finished ? pos + (live.speedNow || 0) * Math.min(1.5, (Date.now() - lastTickAt) / 1000) : pos; },
+  get braking() { return braking; }, workVsGhost,
   switchRef, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
 });
 newRide();
