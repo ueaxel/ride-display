@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '39 (22 Nov 2026, .gpx routes)';
+export const APP_VERSION = '40 · 261122_1125 (move the map with your finger)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -398,6 +398,7 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
 
   const team = ref ? teamAt(t) : [];
   D.drawRoute($('map'), ref, { you, ghost, view: mapView, span: 400, done: you ?? 0, streets, team });
+  $('mapHome').classList.toggle('show', D.isPanned($('map')));
   D.drawElevation($('elev'), ref, you, ghost, team);
   D.drawScatter($('scatter'), S.power, S.hr, S.power.length - 1, { avg: avgWin });
   D.drawTrace($('trace'), S, { window: traceWin });
@@ -452,6 +453,10 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   $('gLeft').textContent = ref ? `${(Math.max(0, ref.total - (you ?? 0)) / 1000).toFixed(2)} km to go` : '';
   $('gOff').style.display = matcher && matcher.offRoute ? 'block' : 'none';
   const riding = document.body.classList.contains('riding');
+  // moved the map with a finger: back to you 20 s after letting go while riding
+  const gm = $('gmap');
+  if (riding && D.isPanned(gm) && Date.now() - gm._pv.at > 20000) D.resetPan(gm);
+  $('zHome').classList.toggle('show', D.isPanned(gm));
   if (free) {
     const f = Date.now() - live.tFix < 10000 ? live.fix : lastFix;
     const me = f ? area.xy(f.lat, f.lon) : null;
@@ -1006,9 +1011,13 @@ const toggleFull = () => {
 $('mFull').onclick = () => { toggleFull(); $('dlgMenu').close(); };
 $('btnFull').onclick = toggleFull;
 window.addEventListener('keydown', e => { if ((e.key === 'f' || e.key === 'F') && !e.target.closest('input, select, textarea')) toggleFull(); });
-$('btnMapView').onclick = e => { mapView = mapView === 'all' ? 'follow' : 'all'; e.target.textContent = mapView === 'all' ? 'Follow' : 'Whole route'; render(); };
+$('btnMapView').onclick = e => { D.resetPan($('map')); mapView = mapView === 'all' ? 'follow' : 'all'; e.target.textContent = mapView === 'all' ? 'Follow' : 'Whole route'; render(); };
 $('btnAvg').onclick = e => { avgWin = avgWin === 10 ? 30 : avgWin === 30 ? 1 : 10; e.target.textContent = `${avgWin} s`; render(); };
 $('btnWin').onclick = e => { traceWin = traceWin === 600 ? 1800 : traceWin === 1800 ? 0 : 600; e.target.textContent = traceWin ? `${traceWin / 60} min` : 'whole'; render(); };
+D.enablePan($('map'), () => render());
+D.enablePan($('gmap'), () => render());
+$('mapHome').onclick = () => { D.resetPan($('map')); render(); };
+$('zHome').onclick = () => { D.resetPan($('gmap')); render(); };
 $('zIn').onclick = () => { ghostSpan = Math.max(60, ghostSpan / 1.5); render(); };
 $('zOut').onclick = () => { ghostSpan = Math.min(3000, ghostSpan * 1.5); render(); };
 window.addEventListener('resize', () => render());

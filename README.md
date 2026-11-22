@@ -40,6 +40,7 @@ When you load a reference, the page also downloads the streets within about 200 
   - *watch / none*: the tablet only listens.
 
   Only one device can control the trainer. When the tablet controls it, don't link the trainer in the watch app (Ride Repro / HrPw), and set the watch activity's Smart Trainer option to off or Free Ride. The watch still records power and HR over ANT+.
+- **Moving the map:** drag the map with one finger to look around, pinch to zoom (mouse: drag and wheel). **◎** (or a double-tap) puts it back on you. On the handlebar screen the map also returns to you by itself 20 s after you let go while riding.
 - **Reset gap** lines the ghost up with you again, like the Lap button on the watch.
 - **Save FIT** saves the ride as a .fit activity file in Downloads. Import it at connect.garmin.com (cloud/upload icon → Import Data; the Garmin Connect phone app can't import files), or into Strava or GoldenCheetah. If the watch recorded the same ride, keep only one of the two in Garmin Connect.
 - **Save CSV** (or ☰ → Save CSV) saves every second of the ride, plus the fitted power steps.

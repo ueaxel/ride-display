@@ -120,7 +120,8 @@ export function initVideoScreen(api) {
     b.textContent = c && c.worldLock ? '✓ Turn with road' : 'Turn with road';
     b.title = 'For videos exported with World Lock on: turn the view with the road';
   }
-  $('mapWhole').onclick = e => { mapWhole = !mapWhole; e.target.textContent = mapWhole ? 'Follow' : 'Whole route'; draw(); };
+  D.enablePan($('vMap'), () => draw());
+  $('mapWhole').onclick = e => { D.resetPan($('vMap')); mapWhole = !mapWhole; e.target.textContent = mapWhole ? 'Follow' : 'Whole route'; draw(); };
 
   // header auto-hide while riding: move the mouse or touch to bring it back
   let hideTimer = null;

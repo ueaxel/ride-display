@@ -102,6 +102,8 @@
   #gmapWrap { flex:1; min-height:60px; position:relative; margin:6px 10px; border-radius:14px; overflow:hidden; background:#0E141B; border:1px solid var(--line); }
   .zoom { position:absolute; right:8px; top:8px; display:flex; flex-direction:column; gap:6px; }
   .zoom button { width:44px; height:44px; padding:0; font-size:22px; }
+  .recenter { display:none; } .recenter.show { display:inline-block; }
+  #map, #gmap, #vMap { cursor:grab; }
   .offroute { position:absolute; left:8px; top:8px; background:var(--red); color:#fff; border-radius:8px; padding:4px 8px; font-size:13px; display:none; }
   .gnums { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; padding:0 10px; }
   .gnum { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 8px; }
@@ -252,7 +254,7 @@
     <div class="tile"><div class="label">Gap to ghost</div><div class="v" id="tGap">–</div><div class="sub" id="tGapS"></div></div>
   </div>
   <div class="board">
-    <section class="panel" id="pMap"><h3>Route <span class="right"><button id="btnMapView">Follow</button></span></h3>
+    <section class="panel" id="pMap"><h3>Route <span class="right"><button id="mapHome" class="recenter" title="Back to the normal view">◎ Recenter</button><button id="btnMapView">Follow</button></span></h3>
       <div class="grow"><canvas id="map"></canvas></div><canvas id="elev"></canvas>
       <div class="ffrow"><button class="ffplay" title="Play the original ride">▶</button><input type="range" class="ff" id="ffT" min="0" max="1000" step="1" value="0" title="Move the ghost (and the team) along the route"><label class="ffme"><input type="checkbox" class="ffMe" checked> me too</label><span class="ffl" id="ffTl"></span></div></section>
     <section class="panel" id="pScatter"><h3>Heart rate vs power <span class="right"><button id="btnAvg">10 s</button></span></h3>
@@ -283,7 +285,7 @@
   <button id="gPeek" class="peekbtn" title="Show the top bar">☰</button>
   <div id="gmapWrap"><canvas id="gmap"></canvas>
     <div class="offroute" id="gOff">off route</div>
-    <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button></div></div>
+    <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button><button id="zHome" class="recenter" title="Back to where you are">◎</button></div></div>
   <div class="gnums">
     <div class="gnum"><div class="label">Heart rate</div><div class="v" id="gHr">–</div><div class="r" id="gHrRef"></div></div>
     <div class="gnum"><div class="label" id="gSpeedLabel">Speed km/h</div><div class="v" id="gSpeed">–</div><div class="r" id="gSpeedRef"></div></div>
