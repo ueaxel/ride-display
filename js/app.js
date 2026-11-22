@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '42 · 261122_1150 (saved map under the route, streets 500 m wide)';
+export const APP_VERSION = '43 · 261122_1134 (media remote buttons reset the gap)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -36,7 +36,7 @@ const area = new AreaMap();                      // offline streets for riding w
 let areaAt = null, trail = [], heading = 0;      // last area check, your track (area metres), direction
 const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg), ...store.get('rider', {}) };
 // ironStops: smooth stops out of the reference; liveStops: after you stop, put the gap back to where it was before you slowed
-const settings = { ironStops: true, liveStops: true, ...store.get('settings', {}) };
+const settings = { ironStops: true, liveStops: true, mediaKeys: true, ...store.get('settings', {}) };
 let replay = null;                               // ▶ Play: the original ride plays back by itself { t: its moving time }
 let braking = false;                             // Brake button (indoor): slows the virtual bike, no motor push
 let outPower = null, refWork = null, refNote = '', stopEp = null, wasMoving = false, refTrail = [];
@@ -635,6 +635,7 @@ function toggleStart() {
   if (S.replay) { replay = null; running = false; const at = pos; newRide(); indoor.dist = at; pos = at; offset = -ref.timeAt(at); }   // your own ride from where the replay was
   running = !running;
   if (!running) { saveRide(S, mode, rideState()); stopTrainer(); }
+  mediaHold(running);
   render();
 }
 
@@ -1032,8 +1033,10 @@ $('teamClose').onclick = () => $('dlgTeam').close();
 $('mSettings').onclick = () => {
   $('dlgMenu').close();
   $('setRider').value = rider.riderKg; $('setBike').value = rider.bikeKg; $('setCda').value = rider.cda; $('setCrr').value = rider.crr;
-  $('setIron').checked = settings.ironStops; $('setLive').checked = settings.liveStops; $('keyTest').textContent = 'Press the button now…';
+  $('setIron').checked = settings.ironStops; $('setLive').checked = settings.liveStops; $('setMedia').checked = settings.mediaKeys;
+  $('keyTest').textContent = 'Press the button now…';
   $('dlgSettings').showModal();
+  mediaHold(true);                                                 // so a media remote shows up in the button test too
 };
 $('setClose').onclick = () => {
   const num = (id, lo, hi, d) => { const v = parseFloat($(id).value); return v >= lo && v <= hi ? v : d; };
@@ -1041,11 +1044,12 @@ $('setClose').onclick = () => {
   rider.cda = num('setCda', 0.15, 0.8, rider.cda); rider.crr = num('setCrr', 0.001, 0.03, rider.crr);
   store.set('rider', { riderKg: rider.riderKg, bikeKg: rider.bikeKg, cda: rider.cda, crr: rider.crr }); store.set('riderKg', rider.riderKg);
   const iron = $('setIron').checked !== settings.ironStops;
-  settings.ironStops = $('setIron').checked; settings.liveStops = $('setLive').checked; store.set('settings', settings);
+  settings.ironStops = $('setIron').checked; settings.liveStops = $('setLive').checked; settings.mediaKeys = $('setMedia').checked; store.set('settings', settings);
   outPower = new OutdoorPower(rider);
   indoor = Object.assign(new IndoorRide(rider), { dist: indoor.dist, speed: indoor.speed });
   if (iron && ref) { const i = refs.findIndex(x => x.name === ref.name); if (i >= 0) selectRef(i); }
   $('dlgSettings').close();
+  mediaHold(running && !finished);
 };
 // Reset gap without the touch screen: volume key (if Chrome passes it on), a
 // Bluetooth remote / keyboard (Enter, space, Page Down, arrows) or headset button.
@@ -1059,9 +1063,38 @@ window.addEventListener('keydown', e => {
   if (RESET_KEYS.includes(e.key) && (mode === 'ghost' || e.key !== ' ')) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
   else if (BRAKE_KEYS.includes(e.key) && indoorMode()) { e.preventDefault(); toggleBrake(); }
 });
-if ('mediaSession' in navigator) for (const a of ['nexttrack', 'previoustrack', 'play', 'pause']) {
-  try { navigator.mediaSession.setActionHandler(a, () => { if (mode === 'ghost') { resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); } }); } catch (e) { /* */ }
+// Media remotes (the cheap round handlebar buttons) send play/pause and next /
+// previous track, not keys. Chrome only hands those to a page that is playing
+// audio, so on the handlebar screen a silent loop plays while you ride.
+let silent = null;
+function silentWav(sec = 10, rate = 8000) {
+  const n = sec * rate, b = new DataView(new ArrayBuffer(44 + n));
+  const str = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); b.setUint32(4, 36 + n, true); str(8, 'WAVEfmt '); b.setUint32(16, 16, true);
+  b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, rate, true); b.setUint32(28, rate, true);
+  b.setUint16(32, 1, true); b.setUint16(34, 8, true); str(36, 'data'); b.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) b.setUint8(44 + i, 128);                 // 8-bit silence
+  return new Blob([b], { type: 'audio/wav' });
 }
+function mediaHold(on) {
+  if (on && settings.mediaKeys && mode === 'ghost') {
+    if (!silent) { silent = new Audio(URL.createObjectURL(silentWav())); silent.loop = true; }
+    silent.play().then(() => {
+      if (!('mediaSession' in navigator)) return;
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'Ride Display', artist: 'Remote button = Reset gap' }); } catch (e) { /* */ }
+      navigator.mediaSession.playbackState = 'playing';
+    }).catch(() => {});
+  } else if (silent && !silent.paused) silent.pause();
+}
+function mediaPress() {
+  if ($('dlgSettings').open) { $('keyTest').textContent = 'Got a media button (play/pause or track) — this button resets the gap.'; return; }
+  if (mode === 'ghost') { resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
+  silent?.play().catch(() => {});                                     // stay the active media app
+}
+if ('mediaSession' in navigator) for (const a of ['nexttrack', 'previoustrack', 'play', 'pause']) {
+  try { navigator.mediaSession.setActionHandler(a, mediaPress); } catch (e) { /* */ }
+}
+window.addEventListener('pagehide', () => mediaHold(false));
 const saveNow = () => { if (S && S.wall.length) saveRide(S, mode, rideState()); };
 window.addEventListener('pagehide', () => links.trainer?.control?.stop());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });

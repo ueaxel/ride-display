@@ -109,7 +109,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 - **Work line** under the gap: `work` = the energy (kJ) the ghost spent riding from you to where it is (+ = you're ahead). Unlike metres it doesn't shrink when the ghost slows on a climb. `used` = how much more energy you've used than the original to get to this point.
 - **Stops**: stops in the reference are smoothed out (the ghost keeps riding instead of braking for its old red lights). When you stop, the gap goes back to what it was before you slowed down once you're up to speed again. Both can be turned off in Settings.
 - **Turn-backs**: a stretch of the reference ridden back and forth is shown in the reference dialog on a small map, with **Cut it out** / **Keep it**.
-- **Reset gap without touching the screen**: Enter, space, Page Up/Down or arrow keys (Bluetooth remote or keyboard), headset buttons, and the volume keys if Chrome passes them on. **Settings → Button test** shows what arrives.
+- **Reset gap without touching the screen**: Enter, space, Page Up/Down or arrow keys (Bluetooth remote or keyboard), headset buttons, and the volume keys if Chrome passes them on. Cheap round **handlebar media buttons** (play/pause, next track) work too: while you ride, the handlebar screen plays a silent sound so Android sends those buttons to the page instead of your music app (turn off in Settings if you want your music to keep playing). **Settings → Button test** shows what arrives.
 - A ride carries on after the page reloads (within 3 h): same ride, same gap, same trail; GPS restarts by itself, the HR strap needs one tap. On the reference map your own path is drawn too (shows detours).
 
 ## Cadence sensor
