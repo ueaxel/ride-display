@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import estimate_power  # noqa: E402  (FIT reader)
 
 FIT_EPOCH = 631065600
+SPARE_BYTES = 500e6                                  # room kept free when writing the ride video
 RIDE_UUID = bytes.fromhex('5269646544697370b1a7e0c35e6f9a21')   # "RideDisp" + random: the app looks for this box
 GOPRO = re.compile(r'^G([XHSO])(\d\d)(\d{4})\.(360|MP4)$', re.I)       # HERO6+ / MAX: GX011234 = chapter 01 of 1234
 GOPRO_OLD = re.compile(r'^G(OPR|P\d\d)(\d{4})\.MP4$', re.I)              # HERO5 and older: GOPR1234, then GP011234 ...
@@ -537,13 +538,29 @@ def build(folder, ride, used, dry_run=False):
     tmp = out.with_name(out.stem + '.partial.mp4')
     if tmp.exists():                                     # left over from a run that was stopped (e.g. disk full)
         tmp.unlink()
-    need = sum(pc['video'].stat().st_size for pc in used) * 1.01 + 500e6
+    need = sum(pc['video'].stat().st_size for pc in used) * 1.01 + SPARE_BYTES
+    low_space = False
     if not (len(used) == 1 and used[0].get('convert')):
         free = shutil.disk_usage(folder).free
         if free < need:
-            raise SystemExit(f'Not enough disk space to write the ride video: it needs about {need / 1e9:.0f} GB, '
-                             f'{free / 1e9:.0f} GB are free on this disk. Free up {(need - free) / 1e9:.0f} GB more and run this again: '
-                             f'what is already converted is kept (folder _ridevideo_work) and not done again.')
+            hint = ('(Deleted files only free their space once the Trash is emptied; with Time Machine, macOS may also keep '
+                    'them a while as "purgeable" space that programs can\'t use yet.)')
+            biggest = max(pc['video'].stat().st_size for pc in used)
+            if all(pc.get('convert') for pc in used) and free > biggest * 1.5 + 2 * SPARE_BYTES:
+                # join while deleting each converted chapter once it has been copied: needs ~ one chapter of room
+                say(f'Only {free / 1e9:.0f} GB free; the ride video needs about {need / 1e9:.0f} GB. {hint}')
+                say('It can still be done by deleting each converted chapter as soon as it has been copied into the ride video. '
+                    'If something goes wrong half-way, those chapters have to be converted again.')
+                ok = True
+                if sys.stdin.isatty():
+                    ok = input('Do that? [y/N] ').strip().lower() in ('y', 'yes', 'j', 'ja')
+                if not ok:
+                    raise SystemExit('Stopped. Free up more space and run this again; nothing is lost.')
+                low_space = True
+            else:
+                raise SystemExit(f'Not enough disk space to write the ride video: it needs about {need / 1e9:.0f} GB, '
+                                 f'{free / 1e9:.0f} GB are free on this disk. Free up {(need - free) / 1e9:.0f} GB more and run this again: '
+                                 f'what is already converted is kept (folder _ridevideo_work) and not done again. {hint}')
     if len(used) == 1:
         src = used[0]['video']
         say(f'Copying {src.name} ...')
@@ -560,10 +577,37 @@ def build(folder, ride, used, dry_run=False):
             for pc in used:
                 lst.write("file '" + str(pc['video'].resolve()).replace("'", "'\\''") + "'\n")
         say(f'Joining {len(used)} videos (no re-encoding) ...')
-        r = subprocess.run([ff, '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst.name,
-                            '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', str(tmp)])
+        cmd = [ff, '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst.name,
+               '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', str(tmp)]
+        if not low_space:
+            r = subprocess.run(cmd)
+            rc = r.returncode
+        else:
+            # follow ffmpeg's progress; once it is 3 s into the next piece, the
+            # previous one has been read completely and closed: delete it
+            ends, t = [], 0.0
+            for pc in used:
+                t += pc['vinfo']['duration']
+                ends.append(t)
+            p = subprocess.Popen(cmd[:3] + ['-progress', 'pipe:1', '-nostats'] + cmd[3:], stdout=subprocess.PIPE, text=True)
+            gone = 0
+            for line in p.stdout:
+                if not line.startswith('out_time_us='):
+                    continue
+                try:
+                    now = int(line.split('=')[1]) / 1e6
+                except ValueError:
+                    continue
+                while gone < len(used) - 1 and now > ends[gone] + 3:
+                    try:
+                        used[gone]['video'].unlink()
+                        say(f'    {used[gone]["video"].name} copied, deleted')
+                    except OSError:
+                        pass
+                    gone += 1
+            rc = p.wait()
         os.unlink(lst.name)
-        if r.returncode != 0:
+        if rc != 0:
             raise SystemExit('ffmpeg could not join the videos (are they all exported with the same settings?)')
     payload = RIDE_UUID + json.dumps(meta).encode()
     with open(tmp, 'ab') as f:                           # extra top-level box at the end; players ignore it
