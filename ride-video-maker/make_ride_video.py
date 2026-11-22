@@ -535,6 +535,15 @@ def build(folder, ride, used, dry_run=False):
         say(f'(dry run) would write {out.name}')
         return out, meta
     tmp = out.with_name(out.stem + '.partial.mp4')
+    if tmp.exists():                                     # left over from a run that was stopped (e.g. disk full)
+        tmp.unlink()
+    need = sum(pc['video'].stat().st_size for pc in used) * 1.01 + 500e6
+    if not (len(used) == 1 and used[0].get('convert')):
+        free = shutil.disk_usage(folder).free
+        if free < need:
+            raise SystemExit(f'Not enough disk space to write the ride video: it needs about {need / 1e9:.0f} GB, '
+                             f'{free / 1e9:.0f} GB are free on this disk. Free up {(need - free) / 1e9:.0f} GB more and run this again: '
+                             f'what is already converted is kept (folder _ridevideo_work) and not done again.')
     if len(used) == 1:
         src = used[0]['video']
         say(f'Copying {src.name} ...')
