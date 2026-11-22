@@ -288,7 +288,12 @@ export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '
   if (untilKm) records = records.filter(r => r.dist <= untilKm * 1000);
   if (records.length < 2) throw new Error('Nothing left before that distance.');
   let estimated = false;
-  if (!records.some(r => r.power !== null) && records.some(r => r.alt !== null)) {
+  // A watch without a power meter may still write a power field, all zeros:
+  // only trust power when a fair share of the riding has some.
+  const riding = records.filter(r => (r.speed ?? 0) > 1).length;
+  const realPower = records.filter(r => (r.power ?? 0) > 0).length >= Math.max(5, 0.25 * riding);
+  if (!realPower && records.some(r => r.alt !== null)) {
+    for (const r of records) r.power = null;
     estimatePower(records, events, { ...rider, riderKg: rider.riderKg || riderKg || 76.5 });
     estimated = true;
   }
@@ -304,8 +309,34 @@ export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '
 
 // ---------------------------------------------------------------- lookups
 
+// Power from a profile alone (speed, slope, change of speed every 5 m), for
+// profiles saved before zero-power files were caught: same physics as
+// estimatePower, a little coarser.
+export function profilePower(P, rider = RIDER) {
+  const n = P.d.length, m = rider.riderKg + (rider.extraKg ?? 1) + rider.bikeKg, mEff = m + 1;
+  const v = P.v.map(x => (x ?? 0) / 3.6), out = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    if (v[i] < 1) continue;
+    const i0 = Math.max(0, i - 4), i1 = Math.min(n - 1, i + 4);
+    const grade = P.a && P.d[i1] > P.d[i0] ? (P.a[i1] - P.a[i0]) / (P.d[i1] - P.d[i0]) : 0;
+    const j0 = Math.max(0, i - 1), j1 = Math.min(n - 1, i + 1);
+    const dKE = P.d[j1] > P.d[j0] ? (v[j1] ** 2 - v[j0] ** 2) / 2 / (P.d[j1] - P.d[j0]) : 0;   // m/s² (energy per metre / mass)
+    const th = Math.atan(Math.max(-0.25, Math.min(0.25, grade)));
+    const F = m * 9.81 * (Math.sin(th) + rider.crr * Math.cos(th)) + 0.5 * 1.2 * rider.cda * v[i] ** 2 + mEff * dKE;
+    out[i] = Math.max(0, F * v[i] / 0.97);
+  }
+  return out.map((_, i) => {                       // smooth over ±15 m
+    let s = 0, k = 0;
+    for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) { s += out[j]; k++; }
+    return Math.round(Math.min(1500, s / k));
+  });
+}
+
 export class Reference {
   constructor(prof) {
+    if (prof.p && prof.v && !prof.p.some(x => x > 0)) {   // all-zero power (saved before the fix): estimate it
+      prof.p = profilePower(prof); prof.powerEstimated = true;
+    }
     this.prof = prof;
     this.d = prof.d;
     this.n = prof.d.length;

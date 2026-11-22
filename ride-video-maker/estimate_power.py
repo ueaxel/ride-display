@@ -288,8 +288,12 @@ def main():
     rider = args.rider_kg or rider
     if rider is None:
         raise SystemExit('No rider weight in the file; pass --rider-kg.')
-    if any(7 in m['values'] for m in msgs if m['kind'] == 'data' and m['glob'] == RECORD):
+    rec_power = [m['values'][7] for m in msgs if m['kind'] == 'data' and m['glob'] == RECORD and 7 in m['values']]
+    if rec_power and any(p and p < 65535 for p in rec_power):
         raise SystemExit('This ride already has power data.')
+    if rec_power:
+        raise SystemExit('This ride has a power field with only zeros (the watch had no power meter). This tool can only '
+                         'add power to rides without a power field. (Ride Display estimates such rides by itself.)')
     mass = rider + args.extra_kg + args.bike_kg
     fill = [r for r in records if r['alt'] is not None]
     for r in records:

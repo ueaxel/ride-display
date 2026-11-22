@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '31 (21 Nov 2026, Ride Video Maker link)';
+export const APP_VERSION = '32 (21 Nov 2026, rides with zero power are estimated)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
