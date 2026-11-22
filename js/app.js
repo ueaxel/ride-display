@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '43 · 261122_1134 (media remote buttons reset the gap)';
+export const APP_VERSION = '44 · 261122_1137 (quicker map when zoomed out)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));

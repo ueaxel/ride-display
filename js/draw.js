@@ -196,16 +196,28 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   }
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   // casing, then grade colours (dimmed where you've already been)
-  ctx.lineWidth = view === 'all' ? 7 : 16; ctx.strokeStyle = '#000';
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) { const [x, y] = toScreen(P.x[i], P.y[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-  ctx.stroke();
-  ctx.lineWidth = view === 'all' ? 4 : 10;
+  // one path per colour (and per done / still to ride) instead of one stroke
+  // per 5-m piece; points closer than 1.5 px on screen are skipped
+  const casing = new Path2D(), runs = new Map();
+  let [lx, ly] = toScreen(P.x[0], P.y[0]), lastKey = null;
+  casing.moveTo(lx, ly);
   for (let i = 1; i < n; i++) {
-    const [x0, y0] = toScreen(P.x[i - 1], P.y[i - 1]), [x1, y1] = toScreen(P.x[i], P.y[i]);
-    ctx.strokeStyle = gradeColor(P.g ? P.g[i - 1] : 0);
-    ctx.globalAlpha = P.d[i] <= done ? 0.35 : 1;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    const [x, y] = toScreen(P.x[i], P.y[i]);
+    const key = (P.g ? P.g[i - 1] : 0) + (P.d[i] <= done ? 'd' : '');
+    if (i < n - 1 && key === lastKey && Math.abs(x - lx) < 1.5 && Math.abs(y - ly) < 1.5) continue;
+    casing.lineTo(x, y);
+    let path = runs.get(key);
+    if (!path) { path = new Path2D(); runs.set(key, path); }
+    if (key !== lastKey) path.moveTo(lx, ly);
+    path.lineTo(x, y);
+    lx = x; ly = y; lastKey = key;
+  }
+  ctx.lineWidth = view === 'all' ? 7 : 16; ctx.strokeStyle = '#000'; ctx.stroke(casing);
+  ctx.lineWidth = view === 'all' ? 4 : 10;
+  for (const [key, path] of runs) {
+    ctx.strokeStyle = gradeColor(parseInt(key, 10));
+    ctx.globalAlpha = key.endsWith('d') ? 0.35 : 1;
+    ctx.stroke(path);
   }
   ctx.globalAlpha = 1;
   const [sx0, sy0] = toScreen(P.x[0], P.y[0]);

@@ -154,42 +154,63 @@ const STYLE = {
   3: { w: 1.6, col: '#3E4A57', dash: [4, 4] }, 9: { w: 3, col: '#1F4E7A', fill: '#173A5C' },
 };
 
+// Zoomed out, small streets go first: smallest px per metre at which each
+// class is still drawn (paths, residential, secondary/tertiary; major roads and
+// water always).
+const MIN_SCALE = { 3: 0.45, 2: 0.12, 1: 0.035, 0: 0, 9: 0 };
+
 // Draw streets with the route's own screen transform. `view` = {cx, cy, r}
 // in metres for culling (null = draw all). scale = px per metre.
+// Level of detail, so zooming out stays quick on a phone: classes too small
+// for the zoom are skipped, so are streets shorter than ~2 px on screen,
+// points closer than 1.5 px to the last one, and each style is stroked as
+// one path instead of street by street.
 export function drawStreets(ctx, streets, toScreen, scale, view, labels = true) {
   if (!streets) return;
   const zoom = Math.max(0.6, Math.min(2.2, scale * 6));
   const named = new Map();
+  const wantLabels = labels && view;            // only streets still drawn get a name
+  const z = ctx.labelZone || [0, 1];
+  const groups = new Map();                       // style key -> Path2D (in drawing order)
   for (const w of streets.ways) {
+    if (scale < (MIN_SCALE[w.c] ?? 0)) continue;
     if (view && (w.b[2] < view.cx - view.r || w.b[0] > view.cx + view.r || w.b[3] < view.cy - view.r || w.b[1] > view.cy + view.r)) continue;
     if (!view && w.c === 3 && scale < 0.05) continue;     // overview: skip paths
-    const st = STYLE[w.c];
-    ctx.beginPath();
+    if (Math.max(w.b[2] - w.b[0], w.b[3] - w.b[1]) * scale < 2) continue;   // a dot on screen
+    const key = `${w.area ? 'a' : w.c}|${w.dim ? 1 : 0}`;
+    let path = groups.get(key);
+    if (!path) { path = new Path2D(); path.c = w.c; path.dim = !!w.dim; path.area = !!w.area; groups.set(key, path); }
+    let lx = null, ly = null, best = null;
+    const last = w.p.length - 2;
     for (let i = 0; i < w.p.length; i += 2) {
       const [x, y] = toScreen(w.p[i], w.p[i + 1]);
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    }
-    ctx.globalAlpha = w.dim ? 0.6 : 1;             // saved area map: a little dimmer than the route's own streets
-    if (w.area) { ctx.fillStyle = st.fill; ctx.fill(); ctx.globalAlpha = 1; continue; }
-    ctx.strokeStyle = st.col; ctx.lineWidth = Math.max(1, st.w * (view ? zoom : 0.5));
-    ctx.setLineDash(st.dash || []); ctx.stroke(); ctx.globalAlpha = 1;
-    if (w.n && labels && view) {
-      // label at the point of the street nearest the middle of the screen
-      let best = null;
-      for (let i = 0; i + 3 < w.p.length; i += 2) {
-        const [ax, ay] = toScreen(w.p[i], w.p[i + 1]), [bx, by] = toScreen(w.p[i + 2], w.p[i + 3]);
-        const x = (ax + bx) / 2, y = (ay + by) / 2;
-        const z = ctx.labelZone || [0, 1];
-        if (x < 50 || x > ctx.w - 50 || y < Math.max(20, z[0] * ctx.h) || y > Math.min(ctx.h - 20, z[1] * ctx.h)) continue;
-        const dd = (x - ctx.w / 2) ** 2 + (y - ctx.h / 2) ** 2;
-        if (!best || dd < best.dd) best = { x, y, dd };
+      if (lx !== null && i !== last && Math.abs(x - lx) < 1.5 && Math.abs(y - ly) < 1.5) continue;
+      if (lx === null) path.moveTo(x, y);
+      else {
+        path.lineTo(x, y);
+        if (wantLabels && w.n) {                  // label at the point nearest the middle of the screen
+          const mx = (lx + x) / 2, my = (ly + y) / 2;
+          if (!(mx < 50 || mx > ctx.w - 50 || my < Math.max(20, z[0] * ctx.h) || my > Math.min(ctx.h - 20, z[1] * ctx.h))) {
+            const dd = (mx - ctx.w / 2) ** 2 + (my - ctx.h / 2) ** 2;
+            if (!best || dd < best.dd) best = { x: mx, y: my, dd };
+          }
+        }
       }
-      const prev = named.get(w.n);
-      if (best && (!prev || w.c < prev.c)) named.set(w.n, { x: best.x, y: best.y, c: w.c });
+      lx = x; ly = y;
     }
+    if (w.area) path.closePath();
+    if (best) { const prev = named.get(w.n); if (!prev || w.c < prev.c) named.set(w.n, { x: best.x, y: best.y, c: w.c }); }
   }
+  for (const path of groups.values()) {
+    const st = STYLE[path.c];
+    ctx.globalAlpha = path.dim ? 0.6 : 1;        // saved area map: a little dimmer than the route's own streets
+    if (path.area) { ctx.fillStyle = st.fill; ctx.fill(path); continue; }
+    ctx.strokeStyle = st.col; ctx.lineWidth = Math.max(1, st.w * (view ? zoom : 0.5));
+    ctx.setLineDash(st.dash || []); ctx.stroke(path);
+  }
+  ctx.globalAlpha = 1;
   ctx.setLineDash([]);
-  if (!view) return;
+  if (!view || !wantLabels) return;
   ctx.font = '600 13px system-ui'; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   let k = 0;
   const boxes = [];                               // skip labels that would overlap
