@@ -121,3 +121,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 ## Fast forward
 
 The slider under the elevation profile (trainer and video screens) moves the ghost along the route; the team rides move with it, on the same clock, with their stops smoothed out. With **me too** ticked you go to the same spot (gap 0), so you can skip a part of the ride together; untick it to move only the ghost and the team. The distance shown is then where you are on the route, with the distance actually ridden beside it.
+
+## Play the original ride
+
+**▶** next to the fast-forward slider (trainer and video screens) plays the original ride by itself at normal speed, from where the ghost is: video, map position, elevation dot, numbers (the original's power, heart rate, speed) and the team. Stops are left out (moving time). No trainer control, and nothing is saved. **⏸** (or Pause) stops it; the slider jumps it; **Start** then begins your own ride from that spot.

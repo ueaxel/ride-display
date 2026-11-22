@@ -13,7 +13,7 @@ function db() {
 const KEEP = 30;                    // newest rides kept
 
 export async function saveRide(S, mode, state = null) {
-  if (!S.wall.length) return;
+  if (!S.wall.length || S.replay) return;               // a replay of the original isn't a ride of yours
   const id = String(S.wall[0]);
   const r = (a, f) => a.map(v => v == null ? null : Math.round(v * f) / f);
   const dec = { speed: 100, dist: 10, lat: 1e6, lon: 1e6, alt: 10, refDist: 10, gapM: 10, gapS: 10, refPower: 1, refHr: 1, work: 1 };

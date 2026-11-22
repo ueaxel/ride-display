@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '35 (21 Nov 2026, fast-forward slider)';
+export const APP_VERSION = '36 (21 Nov 2026, play button)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -37,6 +37,7 @@ let areaAt = null, trail = [], heading = 0;      // last area check, your track 
 const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg), ...store.get('rider', {}) };
 // ironStops: smooth stops out of the reference; liveStops: after you stop, put the gap back to where it was before you slowed
 const settings = { ironStops: true, liveStops: true, ...store.get('settings', {}) };
+let replay = null;                               // ▶ Play: the original ride plays back by itself { t: its moving time }
 let braking = false;                             // Brake button (indoor): slows the virtual bike, no motor push
 let outPower = null, refWork = null, refNote = '', stopEp = null, wasMoving = false, refTrail = [];
 let refs = store.get('refs', []);                // [{name, prof}]
@@ -132,6 +133,13 @@ function tick() {
     Object.assign(live, { power: s.power, cadence: s.cadence, hr: s.hr, tPower: now, tHr: now });
   }
   if (demoGps) { live.fix = demoGps.next(); live.tFix = now; }
+  let replayD = null;
+  if (replay && running && !finished && ref) {
+    // the original ride at normal speed (its moving time: stops left out)
+    replay.t += 1;
+    replayD = Math.min(ref.total, ref.distAtTime(replay.t));
+    Object.assign(live, { power: ref.hasPower ? Math.round(ref.at('p', replayD)) : null, cadence: null, hr: ref.at('hr', replayD) ? Math.round(ref.at('hr', replayD)) : null, tPower: now, tHr: now });
+  }
   const power = now - live.tPower < 3000 ? live.power ?? 0 : 0;
   const cadence = now - live.tCad < 3000 ? live.cadSensor ?? 0          // cadence sensor first, then the trainer's
     : now - live.tPower < 3000 ? live.cadence ?? 0 : 0;
@@ -144,11 +152,13 @@ function tick() {
     // downhill it picks up speed by itself (elevation -> speed), on the flat
     // it slows down. Once it has come to a stop it stays there until you
     // pedal again (no rolling away from a standstill); Brake stops it sooner.
-    const pedaling = power > 0 || cadence > 0;
+    const pedaling = power > 0 || cadence > 0 || replayD != null;
     const before = indoor.dist;
+    if (replayD != null) { indoor.dist = replayD; indoor.speed = Math.max(0, ref.at('v', replayD) / 3.6); } else {
     if (braking && indoor.speed < 0.5 && power > 40) setBrake(false);          // stopped and pedaling again: brake off
     if (pedaling || indoor.speed > 0.3) indoor.step(pedaling ? power : 0, 1, ref ? ref.gradeFraction(indoor.dist) : 0, braking);
     if (!pedaling && indoor.speed <= 0.3) indoor.speed = 0;
+    }
     moving = clock.tick(pedaling || indoor.speed > 0.3 ? 9 : 0);
     dist = indoor.dist; speed = indoor.speed;
     odo += dist - before;
@@ -174,7 +184,8 @@ function tick() {
     if (ref && settings.liveStops) stopWatch(moving, speed, dist);
   }
   wasMoving = moving;
-  if (indoorMode()) control(dist, speed);
+  if (replay) offset = clock.seconds - replay.t;          // the ghost is the original: right with you
+  if (indoorMode() && !replay) control(dist, speed);
   if (mode === 'video') video?.onTick();
   dist = pos;                                     // (the video screen may have switched clips)
   if (!moving) { render(); return; }
@@ -335,7 +346,7 @@ function render() {
   const hr = Date.now() - live.tHr < 5000 ? live.hr : null;
   const startBtns = [$('btnStart'), $('gStart')];
   for (const b of startBtns) {
-    b.textContent = finished ? 'Finished' : running ? 'Stop' : (S.dist.length ? 'Resume' : 'Start');
+    b.textContent = replay && running ? 'Pause' : finished && !S.replay ? 'Finished' : running ? 'Stop' : (S.dist.length && !S.replay ? 'Resume' : 'Start');
     b.classList.toggle('stop', running && !finished);
     b.classList.toggle('primary', !running && !finished);
   }
@@ -469,6 +480,7 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
 function jumpGhostTo(d, moveMe) {
   if (!ref) return;
   d = Math.max(0, Math.min(ref.total, d));
+  if (replay) { replay.t = ref.timeAt(d); moveMe = true; }
   offset = clock.seconds - ref.timeAt(d);
   if (moveMe && indoorMode()) { indoor.dist = d; pos = d; }
   if (S.gapM.length) { S.gapM[S.gapM.length - 1] = pos - d; S.gapS[S.gapS.length - 1] = ref.timeAt(Math.min(pos, ref.total)) - ref.timeAt(d); }
@@ -477,6 +489,7 @@ function jumpGhostTo(d, moveMe) {
   render();
 }
 function syncSliders(ghost) {
+  for (const b of document.querySelectorAll('.ffplay')) { b.textContent = replay && running ? '⏸' : '▶'; b.title = replay && running ? 'Pause' : 'Play the original ride'; }
   for (const id of ['ffT', 'ffV']) {
     const el = $(id);
     if (!el || el.matches(':active') || el.dataset.drag) continue;
@@ -485,6 +498,7 @@ function syncSliders(ghost) {
     $(id + 'l').textContent = ref && ghost != null ? `${(ghost / 1000).toFixed(2)} km` : '';
   }
 }
+for (const b of document.querySelectorAll('.ffplay')) b.onclick = togglePlay;
 for (const id of ['ffT', 'ffV']) {
   const el = $(id);
   el.addEventListener('input', () => { el.dataset.drag = '1'; if (ref) $(id + 'l').textContent = `${(el.value / 1000 * ref.total / 1000).toFixed(2)} km`; });
@@ -545,7 +559,7 @@ async function addTeamFiles(files) {
 // used = your energy so far minus the original rider's at the same distance.
 const workCache = new WeakMap();
 function workVsGhost(you) {
-  if (!ref || !ref.hasPower || you == null || !running) return null;
+  if (!ref || !ref.hasPower || you == null || !running || replay) return null;
   if (!workCache.has(ref)) workCache.set(ref, workProfile(ref.prof));
   const W = workCache.get(ref), st = ref.prof.step, d = Math.min(you, ref.total);
   const i = Math.max(0, Math.min(W.length - 2, Math.floor(d / st))), f = Math.max(0, Math.min(1, (d - ref.prof.d[i]) / st));
@@ -570,8 +584,28 @@ function setBrake(on) {
 }
 function toggleBrake() { if (indoorMode()) setBrake(!braking); }
 
+// ▶ Play / ⏸: the original ride plays by itself (video, map, numbers) from
+// the ghost's position; no trainer control, nothing saved.
+function togglePlay() {
+  if (!ref) { banner('Load a reference ride (or a ride video) first.'); return; }
+  if (replay) { replay = null; running = false; render(); return; }
+  if (running) { banner('Stop your ride first, then press Play.'); return; }
+  const from = Math.min(ref.total - 1, Math.max(0, ref.distAtTime(clock.seconds - offset)));
+  if (S.wall.length || finished) newRide();
+  S.replay = true;
+  replay = { t: ref.timeAt(from) };
+  indoor.dist = from; pos = from; finished = null;
+  stopTrainer();
+  running = true;
+  banner('Playing the original ride (no trainer control, not saved). ⏸ to pause; Start begins your own ride.');
+  setTimeout(() => banner(''), 6000);
+  render();
+}
+
 function toggleStart() {
-  if (finished) return;
+  if (replay && running) { togglePlay(); return; }                                // Stop during a replay = pause it
+  if (finished && !S.replay) return;
+  if (S.replay) { replay = null; running = false; const at = pos; newRide(); indoor.dist = at; pos = at; offset = -ref.timeAt(at); }   // your own ride from where the replay was
   running = !running;
   if (!running) { saveRide(S, mode, rideState()); stopTrainer(); }
   render();
