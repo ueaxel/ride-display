@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '37 (22 Nov 2026, ride library, phone size)';
+export const APP_VERSION = '38 (22 Nov 2026, Play also while riding)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -589,7 +589,7 @@ function toggleBrake() { if (indoorMode()) setBrake(!braking); }
 function togglePlay() {
   if (!ref) { banner('Load a reference ride (or a ride video) first.'); return; }
   if (replay) { replay = null; running = false; render(); return; }
-  if (running) { banner('Stop your ride first, then press Play.'); return; }
+  if (running) toggleStart();                     // your own ride stops (kept in My rides) and the original plays
   const from = Math.min(ref.total - 1, Math.max(0, ref.distAtTime(clock.seconds - offset)));
   if (S.wall.length || finished) newRide();
   S.replay = true;
