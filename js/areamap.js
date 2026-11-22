@@ -52,6 +52,20 @@ export async function countTiles() {
   catch (e) { return 0; }
 }
 
+// keys of all tiles touching a box [south, west, north, east] (degrees)
+export function tilesInBox([s, w, n, e]) {
+  const out = [];
+  for (let i = Math.floor(s / TLAT); i <= Math.floor(n / TLAT); i++)
+    for (let j = Math.floor(w / TLON); j <= Math.floor(e / TLON); j++) out.push(`${i},${j}`);
+  return out;
+}
+// which of these tiles are stored on the device
+export async function storedTiles(keys) {
+  const have = new Set();
+  for (const k of keys) if (await getTile(k)) have.add(k);
+  return have;
+}
+
 // ------------------------------------------------------------ download
 async function fetchTile(key) { return { ways: await fetchBox(tileBox(key)), fetched: Date.now() }; }
 

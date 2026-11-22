@@ -10,7 +10,7 @@ import * as D from './draw.js';
 import { buildFit, fitFromZip } from './fitwriter.js';
 import { downloadStreets, saveStreets, loadStreets, deleteStreets } from './streets.js';
 import { initVideoScreen } from './videoscreen.js';
-import { AreaMap, downloadArea, countTiles } from './areamap.js';
+import { AreaMap, downloadArea, countTiles, tilesInBox, storedTiles } from './areamap.js';
 import { saveRide, listRides, deleteRide } from './myrides.js';
 import { ironStops, findTurnBacks, cutTurnBack, workProfile } from './refedit.js';
 import { OutdoorPower } from './power.js';
@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '41 · 261122_1140 (turn the map, your GPS dot before the ride)';
+export const APP_VERSION = '42 · 261122_1150 (saved map under the route, streets 500 m wide)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -94,9 +94,15 @@ function selectRef(i) {
   $('refName').textContent = ref ? ref.name : 'No reference';
   streets = null; streetsNote = ''; refKey = ref ? ref.name : null;
   if (ref) loadStreets(ref.name).then(st => {
-    if (st && !st.ways.length) st = null;
-    if (ref && r && ref.name === r.name) { streets = st; streetsNote = st ? `Streets: ${st.ways.length} saved on this device.` : 'Streets: not downloaded yet.'; showRefInfo(); render(); }
+    if (st && !st.ways.length && !st.skipped) st = null;
+    if (ref && r && ref.name === r.name) {
+      streets = st; streetsNote = st ? `Streets: ${st.ways.length} saved on this device${(st.buffer ?? 200) >= 500 ? '' : ' (200 m wide: tap Download streets for 500 m)'}.` : 'Streets: not downloaded yet.';
+      showRefInfo(); render();
+      // streets saved before v42 reach 200 m from the route: widen them to 500 m when online
+      if (st && (st.buffer ?? 200) < 500 && navigator.onLine && ref.hasRoute) getStreets();
+    }
   });
+  if (ref && ref.hasRoute) loadAreaAlong(ref);
   matcher = ref && ref.hasRoute ? new RouteMatcher(ref) : null;
   if (matcher && S && S.dist.length) matcher.dist = S.dist[S.dist.length - 1];
   rebuildRefTrail();
@@ -283,9 +289,9 @@ function switchRef(newRef, p, key) {
   const want = ref;
   loadStreets(refKey).then(async st => {
     if (ref !== want) return;
-    if (st && !st.ways.length) st = null;           // an empty download from a busy server: try again
+    if (st && !st.ways.length && !st.skipped) st = null;           // an empty download from a busy server: try again
     if (!st && navigator.onLine && want.hasRoute) {
-      try { st = await downloadStreets(want.prof); await saveStreets(refKey, st); } catch (e) { st = null; }
+      try { st = await downloadStreets(want.prof, { covered: coveredBox }); await saveStreets(refKey, st); } catch (e) { st = null; }
     }
     if (ref === want) { streets = st; render(); }
   });
@@ -397,7 +403,7 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   } else { g.textContent = '–'; g.className = 'v'; $('tGapS').textContent = ref ? '' : 'no reference'; }
 
   const team = ref ? teamAt(t) : [];
-  D.drawRoute($('map'), ref, { you, ghost, view: mapView, span: 400, done: you ?? 0, streets, team });
+  D.drawRoute($('map'), ref, { you, ghost, view: mapView, span: 400, done: you ?? 0, streets: mapStreets(), team });
   $('mapHome').classList.toggle('show', D.isPanned($('map')));
   D.drawElevation($('elev'), ref, you, ghost, team);
   D.drawScatter($('scatter'), S.power, S.hr, S.power.length - 1, { avg: avgWin });
@@ -484,10 +490,10 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
     $('gGapS').textContent = toStart <= 40 ? 'You are at the start: press Start'
       : nr && nr.off <= 40 ? `On the route at km ${(nr.dist / 1000).toFixed(1)} · start ${fmtD(toStart)} away`
       : `Start ${fmtD(toStart)} away` + (nr && nr.dist > 100 && nr.off < toStart - 50 ? ` · route ${fmtD(nr.off)} away (at km ${(nr.dist / 1000).toFixed(1)})` : '');
-    D.drawRoute($('gmap'), ref, { view: 'locate', streets, me: { x: mx, y: my, acc: fixNow.acc, near: nr && nr.off > 15 ? near : null }, anchor: 0.78 });
+    D.drawRoute($('gmap'), ref, { view: 'locate', streets: mapStreets(), me: { x: mx, y: my, acc: fixNow.acc, near: nr && nr.off > 15 ? near : null }, anchor: 0.78 });
     return;
   }
-  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets, trail: refTrail, team: teamAt(clock.seconds),
+  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets: mapStreets(), trail: refTrail, team: teamAt(clock.seconds),
     anchor: riding ? 0.64 : 0.78, labelZone: riding ? [0.3, 0.7] : null });
 }
 
@@ -906,14 +912,61 @@ async function getArea(km) {
   areaAt = null; area.tiles.clear(); area.ensure(f.lat, f.lon, false).then(() => render());
 }
 
+// A stretch of route whose 500 m surroundings are all in the saved area map
+// (☰ → Download map around me) needs no streets of its own.
+async function coveredBox(box) {
+  const keys = tilesInBox(box);
+  return (await storedTiles(keys)).size === keys.length;
+}
+
+// The saved area map along the whole route, from the device only (no download),
+// so the route maps can show it under the route's own streets.
+async function loadAreaAlong(r) {
+  const P = r.prof, coslat = Math.cos(P.lat0 * Math.PI / 180), k = Math.max(1, Math.round(2000 / P.step));
+  for (let i = 0; i < r.n; i += k) {
+    if (ref !== r) return;
+    await area.ensure(P.lat0 + P.y[i] / 110540, P.lon0 + P.x[i] / (coslat * 111320), false);
+  }
+  if (ref === r) render();
+}
+
+// Streets for the route maps: the saved area map (moved into the route's
+// metres) with the route's own streets (500 m either side) on top.
+let mergedKey = null, merged = null;
+function mapStreets() {
+  if (!ref || !ref.hasRoute) return streets;
+  const key = `${ref.name}|${area.version}|${streets ? streets.ways.length : -1}`;
+  if (key === mergedKey) return merged;
+  mergedKey = key;
+  const o = area.origin, P = ref.prof;
+  let extra = [];
+  if (o && area.ways.length) {
+    const cr = Math.cos(P.lat0 * Math.PI / 180), fx = cr / o.cos;
+    const ox = (o.lon - P.lon0) * cr * 111320, oy = (o.lat - P.lat0) * 110540;
+    extra = area.ways.map(w => {
+      const p = new Array(w.p.length);
+      for (let i = 0; i < w.p.length; i += 2) { p[i] = Math.round(ox + w.p[i] * fx); p[i + 1] = Math.round(oy + w.p[i + 1]); }
+      return { c: w.c, n: w.n, area: w.area, dim: true, p, b: [Math.round(ox + w.b[0] * fx), Math.round(oy + w.b[1]), Math.round(ox + w.b[2] * fx), Math.round(oy + w.b[3])] };
+    });
+  }
+  const own = streets ? streets.ways : [];
+  merged = own.length || extra.length ? { ways: [...extra, ...own].sort((a, b) => b.c - a.c) } : null;
+  return merged;
+}
+
 async function getStreets() {
   if (!ref || !ref.hasRoute) return;
   const want = ref;
   streetsNote = 'Streets: downloading from OpenStreetMap…'; showRefInfo();
   try {
-    const st = await downloadStreets(want.prof);
+    const st = await downloadStreets(want.prof, { covered: coveredBox,
+      onProgress: (d, n) => { if (ref === want && n > 6) { streetsNote = `Streets: downloading from OpenStreetMap… ${Math.round(100 * d / n)} %`; showRefInfo(); } } });
     await saveStreets(want.name, st).catch(() => {});
-    if (ref === want) { streets = st; streetsNote = `Streets: ${st.ways.length} downloaded and saved on this device.`; }
+    if (ref === want) {
+      streets = st;
+      streetsNote = `Streets within 500 m of the route: ${st.ways.length} downloaded and saved on this device` +
+        (st.skipped ? ` (${st.skipped} of ${st.boxes} stretches already in your saved map)` : '') + '.';
+    }
   } catch (e) {
     if (ref === want) streetsNote = `<span class="err">Streets: could not download (${e.message}). Connect to the internet and tap “Download streets”.</span>`;
   }
@@ -1046,7 +1099,7 @@ for (const id of ['btnHr', 'btnTrainer', 'btnCad']) $(id).dataset.label = $(id).
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
 video = initVideoScreen({
-  get ref() { return ref; }, get streets() { return streets; }, get pos() { return pos; }, get S() { return S; },
+  get ref() { return ref; }, get streets() { return mapStreets(); }, get pos() { return pos; }, get S() { return S; },
   get running() { return running; }, get finished() { return finished; }, get clock() { return clock; },
   get steps() { return steps; }, get links() { return links; }, get live() { return live; }, get odo() { return odo; },
   get ctlMode() { return ctlMode; }, get rider() { return rider; },

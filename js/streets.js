@@ -5,7 +5,7 @@
 
 const SERVERS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
-const BUFFER_M = 200;
+const BUFFER_M = 500;                 // streets this far either side of the route
 const M_PER_DEG_LAT = 110540.0;
 const M_PER_DEG_LON = 111320.0;
 
@@ -30,17 +30,22 @@ function routeLatLon(prof, every = 150) {
 // One bounding box per ~1.5 km of route (plus BUFFER_M around it): the
 // "around a line" query of Overpass returned nothing in practice. The
 // boxes are filtered down to BUFFER_M from the route afterwards.
-export function overpassQuery(prof) {
+// Boxes as [south, west, north, east] in degrees.
+export function routeBoxes(prof) {
   const pts = routeLatLon(prof, 25);
   const dLat = BUFFER_M / M_PER_DEG_LAT, dLon = BUFFER_M / (M_PER_DEG_LON * Math.cos(prof.lat0 * Math.PI / 180));
   const boxes = [];
   for (let i = 0; i < pts.length; i += 60) {
     const chunk = pts.slice(i, i + 61);
     const la = chunk.map(p => p[0]), lo = chunk.map(p => p[1]);
-    boxes.push([Math.min(...la) - dLat, Math.min(...lo) - dLon, Math.max(...la) + dLat, Math.max(...lo) + dLon].map(v => v.toFixed(5)).join(','));
+    boxes.push([Math.min(...la) - dLat, Math.min(...lo) - dLon, Math.max(...la) + dLat, Math.max(...lo) + dLon]);
   }
+  return boxes;
+}
+export function overpassQuery(prof, boxes = routeBoxes(prof)) {
   const types = Object.keys(CLASS).join('|');
-  const parts = boxes.flatMap(b => [`way(${b})["highway"~"^(${types})$"];`, `way(${b})["natural"="water"];`, `way(${b})["waterway"~"^(river|canal|stream)$"];`]);
+  const parts = boxes.map(b => b.map(v => v.toFixed(5)).join(','))
+    .flatMap(b => [`way(${b})["highway"~"^(${types})$"];`, `way(${b})["natural"="water"];`, `way(${b})["waterway"~"^(river|canal|stream)$"];`]);
   return `[out:json][timeout:90];(${parts.join('')});out geom qt;`;
 }
 
@@ -80,9 +85,8 @@ export function toLocal(json, prof) {
   return { ways, fetched: new Date().toISOString(), attribution: '© OpenStreetMap contributors' };
 }
 
-export async function downloadStreets(prof) {
-  if (!prof.x) throw new Error('The reference ride has no GPS route.');
-  const body = 'data=' + encodeURIComponent(overpassQuery(prof));
+async function fetchJson(query) {
+  const body = 'data=' + encodeURIComponent(query);
   let lastErr;
   for (const url of SERVERS) {
     try {
@@ -91,11 +95,32 @@ export async function downloadStreets(prof) {
       const j = await r.json();
       // a busy server can answer "OK" with no data and a remark: try the next one
       if (j.remark && !(j.elements || []).length) throw new Error('map server: ' + j.remark.slice(0, 80));
-      if (!(j.elements || []).length) throw new Error('map server returned no streets');
-      return toLocal(j, prof);
+      return j;
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
+}
+
+// Streets within BUFFER_M of the route. covered(box) -> true skips the boxes
+// your saved area map already has (☰ → Download map around me). The boxes go
+// in groups of 6 per request, so a long route doesn't time out the server.
+// onProgress(done, total).
+export async function downloadStreets(prof, { covered = null, onProgress = () => {} } = {}) {
+  if (!prof.x) throw new Error('The reference ride has no GPS route.');
+  let boxes = routeBoxes(prof);
+  const all = boxes.length;
+  if (covered) { const keep = []; for (const b of boxes) if (!(await covered(b))) keep.push(b); boxes = keep; }
+  const elements = new Map();
+  for (let i = 0; i < boxes.length; i += 6) {
+    onProgress(i, boxes.length);
+    const j = await fetchJson(overpassQuery(prof, boxes.slice(i, i + 6)));
+    for (const el of j.elements || []) elements.set(el.id, el);
+  }
+  onProgress(boxes.length, boxes.length);
+  if (boxes.length && !elements.size) throw new Error('map server returned no streets');
+  const out = toLocal({ elements: [...elements.values()] }, prof);
+  out.buffer = BUFFER_M; out.skipped = all - boxes.length; out.boxes = all;
+  return out;
 }
 
 // ------------------------------------------------------------ device storage
@@ -144,9 +169,10 @@ export function drawStreets(ctx, streets, toScreen, scale, view, labels = true) 
       const [x, y] = toScreen(w.p[i], w.p[i + 1]);
       i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
-    if (w.area) { ctx.fillStyle = st.fill; ctx.fill(); continue; }
+    ctx.globalAlpha = w.dim ? 0.6 : 1;             // saved area map: a little dimmer than the route's own streets
+    if (w.area) { ctx.fillStyle = st.fill; ctx.fill(); ctx.globalAlpha = 1; continue; }
     ctx.strokeStyle = st.col; ctx.lineWidth = Math.max(1, st.w * (view ? zoom : 0.5));
-    ctx.setLineDash(st.dash || []); ctx.stroke();
+    ctx.setLineDash(st.dash || []); ctx.stroke(); ctx.globalAlpha = 1;
     if (w.n && labels && view) {
       // label at the point of the street nearest the middle of the screen
       let best = null;

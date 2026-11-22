@@ -27,7 +27,7 @@ The same button also takes a **.gpx** file:
 
 **Built-in routes:** the `.gpx` files in [`routes/`](routes/) listed in `routes/index.json` appear in the reference list under *Routes* on every device, so you don't need to copy the file to the tablet or phone. Pick one to make it a reference. To add a route, put its .gpx in `routes/` and add a line to `routes/index.json`.
 
-When you load a reference, the page also downloads the streets within about 200 m of the route from OpenStreetMap (Overpass API) and stores them on the device. That download needs internet, so do it at home. If it fails, use **Download streets** in the same dialog.
+When you load a reference, the page also downloads the streets within about 500 m of the route (stretches already covered by your saved map, ☰ → *Download map around me*, are skipped) from OpenStreetMap (Overpass API) and stores them on the device. That download needs internet, so do it at home. If it fails, use **Download streets** in the same dialog.
 
 ## Riding
 
@@ -40,6 +40,7 @@ When you load a reference, the page also downloads the streets within about 200 
   - *watch / none*: the tablet only listens.
 
   Only one device can control the trainer. When the tablet controls it, don't link the trainer in the watch app (Ride Repro / HrPw), and set the watch activity's Smart Trainer option to off or Free Ride. The watch still records power and HR over ANT+.
+- **Streets on the route maps:** the route's own streets (500 m either side) plus, a little dimmer underneath, your saved area map wherever you've downloaded it. References saved before v42 (200 m) are widened to 500 m automatically the next time you open them online.
 - **Moving the map:** drag the map with one finger to look around, pinch to zoom and twist two fingers to turn it (mouse: drag, wheel zooms, shift + wheel turns). A compass shows north when the map isn't heading-up. **◎** (or a double-tap) puts it back on you. On the handlebar screen the map also returns to you by itself 20 s after you let go while riding.
 - **Before the ride (handlebar):** tap **GPS** after loading the reference: the map shows you as a blinking **green dot**, the route's **START** flag and, when you're off the route, a dashed green line to the nearest point of the route, with the distances to both under the gap. Ride to the start and press Start, or join the route where it's nearest, press Start there and then **Reset gap**.
 - **Reset gap** lines the ghost up with you again, like the Lap button on the watch.
