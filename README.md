@@ -1,15 +1,18 @@
 # Ride Display
 
-One web page with two screens. It runs in Chrome; nothing to install.
+One web page with three screens, plus a tool for making your own ride videos. It runs in Chrome; nothing to install.
 
 | Screen | Device | Reads | Shows |
 |---|---|---|---|
 | **Trainer** (`#trainer`) | TCL tablet beside the trainer | R200 over Bluetooth (FTMS, or Cycling Power), HRM 200 strap | power, HR, cadence, route map with you and the ghost, elevation, HR vs power, power/HR over time, HR response to power steps |
 | **Handlebar** (`#ghost`) | Pixel 3a on the bars | phone GPS, HRM 200 strap | gap to the ghost in metres and seconds, gauge, heading-up map, HR and speed against the original |
-
 | **Video** (`#video`) | Mac (Chrome), or the tablet with flat videos | same as Trainer | your ride video full screen, following your position; numbers, map, HR vs power and traces floating on top |
 
 The watch is not involved and the iPhone doesn't need to be connected. The watch keeps recording, and indoors it keeps controlling the R200 over **ANT+**. Each display listens to the same sensors over **Bluetooth**. If a sensor won't connect to the display, check that the watch is using it over ANT+ and not Bluetooth.
+
+## Ride Video Maker (make your own ride videos)
+
+The [`ride-video-maker`](ride-video-maker/) folder has the tool that turns a ride's .fit file and the GoPro files recorded during it into one video for the video screen: GPS time sync, GoPro MAX .360 → 360° conversion with horizon levelling, chapters joined. It runs on your own computer (Mac: double-click; anywhere: Python 3 + ffmpeg). See its [README](ride-video-maker/README.md).
 
 ## Reference ride
 
