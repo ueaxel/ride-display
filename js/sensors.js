@@ -240,9 +240,20 @@ export class FtmsControl {
     if (this.hasControl) await this.send([0x07]);      // Start / Resume
     return this.hasControl;
   }
+  // Ride stopped: flat road / no load, then FTMS Stop, so a trainer with a
+  // motor doesn't keep driving the flywheel (it would on a descent).
+  async stop() {
+    if (!this.cp || !this.hasControl) return;
+    try {
+      await this.send(this.last?.kind === 'power' ? powerCommand(0) : simCommand(0));
+      await this.send([0x08, 0x01]);                     // Stop
+      this.stopped = true; this.message = 'trainer stopped'; this.last = null;
+    } catch (e) { /* */ }
+  }
   async apply(kind, value) {
     try {
       if (!(await this.ensureControl())) return false;
+      if (this.stopped) { await this.send([0x07]); this.stopped = false; }   // Start / Resume
       const r = await this.send(kind === 'power' ? powerCommand(value) : simCommand(value));
       if (r === 5) this.hasControl = false;
       this.last = { kind, value, ok: r === 1, at: Date.now() };

@@ -19,6 +19,7 @@
   button:active { background:#2A3644; }
   button.primary { background:var(--teal); color:#062520; border-color:var(--teal); font-weight:600; }
   button.stop { background:var(--red); border-color:var(--red); color:#fff; }
+  #btnBrake.on { background:var(--red); color:#fff; border-color:var(--red); }
   .chip { display:inline-flex; align-items:center; gap:7px; }
   .chip::before { content:''; width:9px; height:9px; border-radius:50%; background:#4A5563; }
   .chip[data-state=connected]::before { background:var(--green); }
@@ -208,6 +209,7 @@
   <span class="spacer"></span>
   <button id="btnStart" class="primary wide">Start</button>
   <button id="btnResync" class="wide">Reset gap</button>
+  <button id="btnBrake" class="wide" title="Brake (also: Page Up / ← on a remote or keyboard)">Brake</button>
   <button id="btnFit" class="wide">Save FIT</button>
   <button id="btnFull" title="Full screen (key F)">⛶</button>
   <button id="btnMenu">☰</button>
@@ -337,7 +339,7 @@
   <p class="muted">CdA 0.32 is riding on the hoods, about 0.28 in the drops. Crr 0.0055 is good road tyres; 0.008 rough roads.</p>
   <label class="check"><input type="checkbox" id="setIron"> Smooth out stops in the reference (the ghost doesn't brake for its old red lights)</label>
   <label class="check"><input type="checkbox" id="setLive"> When you stop, put the gap back once you're up to speed again</label>
-  <p><b>Button test</b> (Reset gap without touching the screen): press the phone's volume button, or a Bluetooth remote. <span id="keyTest"></span></p>
+  <p><b>Button test</b>: press a button on a Bluetooth remote (or the phone's volume button). Page Down / → / Enter = Reset gap; Page Up / ← = Brake (trainer and video screens). <span id="keyTest"></span></p>
   <div class="row"><button id="setClose" class="primary">Done</button></div>
 </dialog>
 

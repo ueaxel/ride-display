@@ -350,13 +350,15 @@ export class IndoorRide {
     this.cda = rider.cda; this.crr = rider.crr;
     this.dist = 0; this.speed = 0;
   }
-  step(watts, dt, grade) {
+  // brake: true = braking hard (about 3 m/s² of deceleration)
+  step(watts, dt, grade, brake = false) {
     if (dt <= 0) return;
     dt = Math.min(dt, 5);
     const angle = Math.atan(grade), sinA = Math.sin(angle), cosA = Math.cos(angle);
     const n = Math.max(1, Math.floor(dt / 0.25)), h = dt / n;
     for (let i = 0; i < n; i++) {
-      const resist = this.mass * G * (sinA + this.crr * cosA) + 0.5 * 1.2 * this.cda * this.speed ** 2;
+      const resist = this.mass * G * (sinA + this.crr * cosA) + 0.5 * 1.2 * this.cda * this.speed ** 2
+        + (brake && this.speed > 0 ? this.massEff * 3 : 0);
       const push = watts * DRIVETRAIN / Math.max(this.speed, 1);
       this.speed = Math.max(0, this.speed + (push - resist) / this.massEff * h);
       this.dist += this.speed * h;

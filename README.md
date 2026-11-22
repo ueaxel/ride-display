@@ -104,3 +104,9 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 ## GoPro MAX .360 straight into a ride video
 
 `Make Ride Video.command` now converts the GoPro MAX's own `.360` files itself (no GoPro Player export needed): put the watch `.fit` and all `.360` chapters of the ride in one folder and run it. Each chapter's two lens tracks become one 360° (equirectangular) video (ffmpeg; on a Mac with the hardware HEVC encoder, about as long as the ride), the chapters are joined, and the camera's gravity sensor is stored with the ride, so the video screen keeps the horizon level by itself (the Level sliders still fine-tune). Full-length GoPro Player exports in the folder are still used when present.
+
+## Brake, and the trainer stops with the ride
+
+- **Brake** (trainer and video screens; or Page Up / ← on a remote or keyboard): the virtual bike brakes hard (about 3 m/s²) and the trainer gets a light uphill instead of the descent, so a trainer with a motor stops pushing. It lets go by itself once you've stopped and pedal again, or tap it again.
+- When you stop pedaling, the trainer never gets a descent (flat instead). On **Stop**, at the finish, on **New ride** or when the page closes, the trainer is set flat and sent the FTMS Stop command.
+- Bluetooth remotes: Page Down / → / Enter reset the gap; Page Up / ← brake. A presenter clicker (Bluetooth, not a USB dongle on the phone) has exactly these two buttons. Settings → Button test shows what arrives.

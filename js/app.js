@@ -23,7 +23,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '28 (21 Nov 2026, .360 conversion, auto level)';
+export const APP_VERSION = '29 (21 Nov 2026, brake, trainer stops with the ride)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -36,6 +36,7 @@ let areaAt = null, trail = [], heading = 0;      // last area check, your track 
 const rider = { ...RIDER, riderKg: store.get('riderKg', RIDER.riderKg), ...store.get('rider', {}) };
 // ironStops: smooth stops out of the reference; liveStops: after you stop, put the gap back to where it was before you slowed
 const settings = { ironStops: true, liveStops: true, ...store.get('settings', {}) };
+let braking = false;                             // Brake button (indoor): slows the virtual bike, no motor push
 let outPower = null, refWork = null, refNote = '', stopEp = null, wasMoving = false, refTrail = [];
 let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
@@ -51,7 +52,7 @@ let ctlMode = store.get('ctlMode', 'off'), fixedW = store.get('fixedW', 150), ct
 let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = null;
 
 function newRide() {
-  if (S && S.wall.length) saveRide(S, mode, { open: false });     // the ride you had is kept, closed
+  if (S && S.wall.length) { saveRide(S, mode, { open: false }); stopTrainer(); }     // the ride you had is kept, closed
   S = { power: [], hr: [], cad: [], speed: [], dist: [], refDist: [], gapM: [], gapS: [], refPower: [], refHr: [],
     lat: [], lon: [], alt: [], wall: [], pEst: [], work: [] };
   trail = []; refTrail = []; stopEp = null; wasMoving = false;
@@ -140,7 +141,8 @@ function tick() {
   if (indoorMode()) {
     moving = clock.tick(power > 0 || cadence > 0 ? 9 : 0);
     const before = indoor.dist;
-    if (moving) indoor.step(power, 1, ref ? ref.gradeFraction(indoor.dist) : 0);
+    if (braking && indoor.speed < 0.5 && power > 40) setBrake(false);          // stopped and pedaling again: brake off
+    if (moving || braking) indoor.step(moving ? power : 0, 1, ref ? ref.gradeFraction(indoor.dist) : 0, braking);
     dist = indoor.dist; speed = moving ? indoor.speed : 0;
     odo += dist - before;
   } else {
@@ -186,7 +188,7 @@ function tick() {
     S.gapS.push(ref.timeAt(Math.min(dist, ref.total)) - refSec);   // + = ahead
     S.refPower.push(ref.hasPower ? ref.at('p', Math.min(dist, ref.total)) : null);
     S.refHr.push(ref.at('hr', Math.min(dist, ref.total)) || null);
-    if (dist >= ref.total) { finished = { gapS: ref.totalTime - refSec }; saveRide(S, mode, rideState()); }
+    if (dist >= ref.total) { finished = { gapS: ref.totalTime - refSec }; saveRide(S, mode, rideState()); stopTrainer(); }
   } else {
     for (const k of ['refDist', 'gapM', 'gapS', 'refPower', 'refHr']) S[k].push(null);
   }
@@ -274,6 +276,7 @@ function switchRef(newRef, p, key) {
 
 // What the trainer should do now; sent when it changed enough or every 10 s.
 function controlTarget(dist, speed) {
+  if (braking) return ctlMode === 'grade' || !ref ? { kind: 'grade', v: 0.04 } : { kind: 'power', v: 0 };
   if (ctlMode === 'fixed') return { kind: 'power', v: fixedW };
   if (!ref || finished) return null;
   const d = Math.min(dist, ref.total);
@@ -283,7 +286,8 @@ function controlTarget(dist, speed) {
     for (let k = 2; k <= 8; k++) s += ref.at('p', Math.min(ref.total, d + Math.max(speed, 3) * k));
     return { kind: 'power', v: Math.max(60, Math.min(600, Math.round(s / 7 / 5) * 5)) };
   }
-  if (ctlMode === 'grade') return { kind: 'grade', v: Math.round(ref.gradeFraction(d) * 200) / 200 };   // 0.5 % steps
+  // stopped (not pedaling): never a descent, or a motorised trainer keeps spinning the flywheel
+  if (ctlMode === 'grade') return { kind: 'grade', v: Math.round((live.moving ? ref.gradeFraction(d) : Math.max(0, ref.gradeFraction(d))) * 200) / 200 };
   return null;
 }
 
@@ -453,10 +457,20 @@ function interpW(d) {
 }
 function sign1(x) { return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1); }
 
+function stopTrainer() { setBrake(false); links.trainer?.control?.stop(); ctlSent = { v: null, at: 0 }; }
+function setBrake(on) {
+  braking = on;
+  for (const b of [$('btnBrake')]) b.classList.toggle('on', on);
+  ctlSent = { v: null, at: 0 };
+  if (on && indoorMode()) control(pos, indoor.speed);
+  render();
+}
+function toggleBrake() { if (indoorMode()) setBrake(!braking); }
+
 function toggleStart() {
   if (finished) return;
   running = !running;
-  if (!running) saveRide(S, mode, rideState());
+  if (!running) { saveRide(S, mode, rideState()); stopTrainer(); }
   render();
 }
 
@@ -753,6 +767,7 @@ $('mAllTrainer').onclick = () => { $('dlgMenu').close(); if (links.trainer) { li
 $('mAllHr').onclick = () => { $('dlgMenu').close(); if (links.hr) { links.hr.close(); links.hr = null; } bt('hr', connectHeartRate, $('btnHr'), onHrData, true); };
 $('btnStart').onclick = $('gStart').onclick = toggleStart;
 $('btnResync').onclick = $('gResync').onclick = resync;
+$('btnBrake').onclick = toggleBrake;
 $('mCsv').onclick = saveCsv;
 $('btnFit').onclick = $('mFit').onclick = saveFit;
 $('btnRef').onclick = () => { fillRefList(); showRefInfo(); $('dlgRef').showModal(); };
@@ -786,16 +801,21 @@ $('setClose').onclick = () => {
 };
 // Reset gap without the touch screen: volume key (if Chrome passes it on), a
 // Bluetooth remote / keyboard (Enter, space, Page Down, arrows) or headset button.
-const RESET_KEYS = ['AudioVolumeUp', 'VolumeUp', 'AudioVolumeDown', 'VolumeDown', 'Enter', ' ', 'PageDown', 'PageUp', 'ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'MediaTrackNext', 'MediaTrackPrevious', 'MediaPlayPause', 'Camera'];
+// Two-button remotes (presenters: Page Down / Page Up, or arrows): one resets
+// the gap, the other brakes (indoors).
+const RESET_KEYS = ['AudioVolumeUp', 'VolumeUp', 'Enter', ' ', 'PageDown', 'ArrowRight', 'ArrowDown', 'MediaTrackNext', 'MediaPlayPause', 'Camera'];
+const BRAKE_KEYS = ['AudioVolumeDown', 'VolumeDown', 'PageUp', 'ArrowLeft', 'ArrowUp', 'MediaTrackPrevious', 'b', 'B'];
 window.addEventListener('keydown', e => {
-  if ($('dlgSettings').open) { $('keyTest').textContent = `Got "${e.key}"` + (RESET_KEYS.includes(e.key) ? ' — this button resets the gap.' : ' — not used.'); e.preventDefault(); return; }
+  if ($('dlgSettings').open) { $('keyTest').textContent = `Got "${e.key}"` + (RESET_KEYS.includes(e.key) ? ' — this button resets the gap.' : BRAKE_KEYS.includes(e.key) ? ' — this button brakes (trainer / video screen).' : ' — not used.'); e.preventDefault(); return; }
   if (e.target.closest('input, select, textarea') || document.querySelector('dialog[open]')) return;
-  if (mode === 'ghost' && RESET_KEYS.includes(e.key)) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
+  if (RESET_KEYS.includes(e.key) && (mode === 'ghost' || e.key !== ' ')) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
+  else if (BRAKE_KEYS.includes(e.key) && indoorMode()) { e.preventDefault(); toggleBrake(); }
 });
 if ('mediaSession' in navigator) for (const a of ['nexttrack', 'previoustrack', 'play', 'pause']) {
   try { navigator.mediaSession.setActionHandler(a, () => { if (mode === 'ghost') { resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); } }); } catch (e) { /* */ }
 }
 const saveNow = () => { if (S && S.wall.length) saveRide(S, mode, rideState()); };
+window.addEventListener('pagehide', () => links.trainer?.control?.stop());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
 window.addEventListener('pagehide', saveNow);
 $('btnMenu').onclick = () => { $('appVersion').textContent = 'Version ' + APP_VERSION; $('dlgMenu').showModal(); };
