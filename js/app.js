@@ -14,6 +14,7 @@ import { AreaMap, downloadArea, countTiles } from './areamap.js';
 import { saveRide, listRides, deleteRide } from './myrides.js';
 import { ironStops, findTurnBacks, cutTurnBack, workProfile } from './refedit.js';
 import { OutdoorPower } from './power.js';
+import { layOnRoute, memberAt, TEAM_COLORS } from './team.js';
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -23,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '33 (21 Nov 2026, coasting downhill)';
+export const APP_VERSION = '34 (21 Nov 2026, team rides)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -381,8 +382,9 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
     $('tGapS').textContent = `${sign(gapS)} s ${gapS >= 0 ? 'ahead' : 'behind'}`;
   } else { g.textContent = '–'; g.className = 'v'; $('tGapS').textContent = ref ? '' : 'no reference'; }
 
-  D.drawRoute($('map'), ref, { you, ghost, view: mapView, span: 400, done: you ?? 0, streets });
-  D.drawElevation($('elev'), ref, you, ghost);
+  const team = ref ? teamAt(t) : [];
+  D.drawRoute($('map'), ref, { you, ghost, view: mapView, span: 400, done: you ?? 0, streets, team });
+  D.drawElevation($('elev'), ref, you, ghost, team);
   D.drawScatter($('scatter'), S.power, S.hr, S.power.length - 1, { avg: avgWin });
   D.drawTrace($('trace'), S, { window: traceWin });
   const st = steps.steps, sum = steps.summary();
@@ -450,11 +452,58 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
       anchor: riding ? 0.64 : 0.72, labelZone: riding ? [0.3, 0.7] : null, note: links.gps ? '' : 'Tap GPS to see where you are' });
     return;
   }
-  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets, trail: refTrail,
+  D.drawRoute($('gmap'), ref, { you: you ?? 0, ghost, view: 'follow', span: riding ? ghostSpan * 1.3 : ghostSpan, done: you ?? 0, streets, trail: refTrail, team: teamAt(clock.seconds),
     anchor: riding ? 0.64 : 0.78, labelZone: riding ? [0.3, 0.7] : null });
 }
 
 // ------------------------------------------------------------------ actions
+
+// ------------------------------------------------------------------ team rides
+// More rides of the same route as extra ghosts (dots on the map and the
+// elevation profile). The numbers stay those of the reference ghost.
+// Stored per reference name: { name, color, d: [ref distance per moving second] }.
+function teamOf(r = ref) { return r ? (store.get('teams', {})[r.name] || []) : []; }
+function saveTeam(list, r = ref) { const all = store.get('teams', {}); all[r.name] = list; return store.set('teams', all); }
+// positions of the team at moving time t (same clock and Reset-gap offset as the ghost)
+function teamAt(t) {
+  const sec = running || finished ? t - offset : 0;
+  return teamOf().map(m => ({ d: Math.min(ref.total, memberAt(m, sec)), color: m.color, name: m.name }));
+}
+
+function showTeam() {
+  const box = $('teamList'); box.innerHTML = '';
+  $('teamRef').textContent = ref ? ref.name : 'none: load a reference ride first';
+  const team = teamOf();
+  if (!team.length) box.innerHTML = '<p class="muted">No team rides yet.</p>';
+  team.forEach((m, k) => {
+    const row = document.createElement('div'); row.className = 'cliprow';
+    row.innerHTML = `<span class="swatch" style="background:${m.color}"></span><div><b>${m.name}</b><br><span class="muted">${fmtTime(m.d.length - 1)} moving, ${(m.d[m.d.length - 1] / 1000).toFixed(2)} km of the route</span></div>`;
+    const del = document.createElement('button'); del.textContent = 'Remove';
+    del.onclick = () => { const t = teamOf(); t.splice(k, 1); saveTeam(t); showTeam(); render(); };
+    row.append(del); box.appendChild(row);
+  });
+}
+async function addTeamFiles(files) {
+  if (!ref) return;
+  const msgs = [];
+  for (const file of files) {
+    try {
+      let buf = await file.arrayBuffer();
+      if (/\.zip$/i.test(file.name) || new Uint8Array(buf, 0, 2).join() === '80,75') buf = await fitFromZip(buf);
+      const name = file.name.replace(/\.(fit|zip)$/i, '');
+      const P = profileFromFit(buf, { rider, name });
+      const laid = layOnRoute(ref, P, { smoothStops: settings.ironStops });
+      const team = teamOf().filter(m => m.name !== name);
+      const used = new Set(team.map(m => m.color));
+      team.push({ name, color: TEAM_COLORS.find(c => !used.has(c)) || TEAM_COLORS[team.length % TEAM_COLORS.length], d: laid.d });
+      if (!saveTeam(team)) throw new Error('not enough storage on this device');
+      msgs.push(`${name}: added`);
+    } catch (e) { msgs.push(`<span class="err">${file.name}: ${e.message}</span>`); }
+  }
+  $('teamInfo').innerHTML = msgs.join('<br>');
+  $('teamFile').value = '';
+  showTeam(); render();
+}
 
 // Work vs the ghost at your spot (kJ), for any route (also video clips):
 // used = your energy so far minus the original rider's at the same distance.
@@ -799,6 +848,9 @@ $('refDelete').onclick = () => {
   deleteStreets(refs[i].name);
   refs.splice(i, 1); store.set('refs', refs); fillRefList(); selectRef(refs.length ? 0 : -1);
 };
+$('mTeam').onclick = () => { $('dlgMenu').close(); $('teamInfo').textContent = ''; showTeam(); $('dlgTeam').showModal(); };
+$('teamFile').onchange = e => addTeamFiles([...e.target.files]);
+$('teamClose').onclick = () => $('dlgTeam').close();
 $('mSettings').onclick = () => {
   $('dlgMenu').close();
   $('setRider').value = rider.riderKg; $('setBike').value = rider.bikeKg; $('setCda').value = rider.cda; $('setCrr').value = rider.crr;
@@ -871,7 +923,7 @@ video = initVideoScreen({
   get ctlMode() { return ctlMode; }, get rider() { return rider; },
   // position now, between the 1-s ticks (smooth video)
   posNow() { return live.moving && running && !finished ? pos + (live.speedNow || 0) * Math.min(1.5, (Date.now() - lastTickAt) / 1000) : pos; },
-  get braking() { return braking; }, workVsGhost,
+  get braking() { return braking; }, workVsGhost, teamAt: () => (ref ? teamAt(clock.seconds) : []),
   switchRef, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
 });
 newRide();

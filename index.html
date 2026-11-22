@@ -84,6 +84,8 @@
   .tbmap { width:100%; height:160px; display:block; margin-top:6px; }
   .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .setgrid input { width:100%; }
+  .swatch { width:14px; height:14px; border-radius:50%; flex:none; border:2px solid #000; }
+  label.btnlike { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); cursor:pointer; }
   label.check { display:flex; gap:8px; align-items:flex-start; margin:8px 0; }
   #gauge { height:30px; margin:6px 14px 0; width:auto; }
   .gaugelab { display:flex; justify-content:space-between; margin:0 14px; color:var(--muted); font-size:12px; }
@@ -332,6 +334,16 @@
   <div class="row"><button id="vClipsClose" class="primary">Close</button></div>
 </dialog>
 
+<dialog id="dlgTeam">
+  <h2 style="margin-top:0">Team rides</h2>
+  <p>More rides of the same route race along as coloured dots on the map and the elevation profile (the numbers stay those of the reference ghost). Each starts where it passes the reference's start and follows the same clock as the ghost (Reset gap moves them all).</p>
+  <p>Reference: <b id="teamRef"></b></p>
+  <label class="btnlike">Add rides (.fit or .zip, several at once)<input type="file" id="teamFile" accept=".fit,.zip,application/octet-stream" multiple hidden></label>
+  <p id="teamInfo"></p>
+  <div id="teamList" style="max-height:45vh; overflow:auto"></div>
+  <div class="row"><button id="teamClose" class="primary">Close</button></div>
+</dialog>
+
 <dialog id="dlgSettings">
   <h2 style="margin-top:0">Settings</h2>
   <p>Rider and bike: for the power estimate on the phone (from speed, acceleration and slope), for reference rides without a power meter, and for the speed on the trainer.</p>
@@ -405,6 +417,7 @@
   <div class="row" style="justify-content:flex-start">
     <button id="mRides">My rides</button>
     <button id="mArea">Download map around me</button>
+    <button id="mTeam">Team rides</button>
     <button id="mSettings">Settings</button>
   </div>
   <div class="row" style="justify-content:flex-start">

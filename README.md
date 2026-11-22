@@ -113,3 +113,7 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 - **Brake** (trainer and video screens; or Page Up / ← on a remote or keyboard): the virtual bike brakes hard (about 3 m/s²) and the trainer gets a light uphill instead of the descent, so a trainer with a motor stops pushing. It lets go by itself once you've stopped and pedal again, or tap it again.
 - When you stop pedaling, the trainer never gets a descent (flat instead). On **Stop**, at the finish, on **New ride** or when the page closes, the trainer is set flat and sent the FTMS Stop command.
 - Bluetooth remotes: Page Down / → / Enter reset the gap; Page Up / ← brake. A presenter clicker (Bluetooth, not a USB dongle on the phone) has exactly these two buttons. Settings → Button test shows what arrives.
+
+## Team rides
+
+**☰ → Team rides** adds more rides of the same route (.fit or .zip, several at once) to the current reference. Each one races along as a coloured dot on the map and the elevation profile, on all screens; the numbers (gap, power, work) stay those of the reference ghost. A team ride starts where it passes the reference's start, is laid onto the reference route (detours hold its position), uses the same clock as the ghost (Reset gap moves them all), and gets its stops smoothed out like the reference. Rides of another route are refused.

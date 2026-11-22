@@ -417,11 +417,11 @@ export function initVideoScreen(api) {
       if (api.ref && gapM != null) { g.textContent = `${api.sign(gapM)} m`; g.className = 'v ' + api.gapClass(gapM); set('vGapS', `${api.sign(gapS)} s`); }
       else { g.textContent = '–'; g.className = 'v'; set('vGapS', ''); }
     }
-    if (layout.elev.on) D.drawElevationPlain($('vElev'), api.ref, you, ghost);
+    if (layout.elev.on) D.drawElevationPlain($('vElev'), api.ref, you, ghost, api.teamAt());
     const c = clips[cur];
     const vidAt = c && c.ref === api.ref && view.ready ? c.distAtVideo(view.video.currentTime) : null;
     if (layout.map.on) {
-      D.drawRoute($('vMap'), api.ref, { you: you ?? 0, ghost, view: mapWhole ? 'all' : 'follow', span: 300, done: you ?? 0, streets: api.streets, videoAt: vidAt });
+      D.drawRoute($('vMap'), api.ref, { you: you ?? 0, ghost, view: mapWhole ? 'all' : 'follow', span: 300, done: you ?? 0, streets: api.streets, videoAt: vidAt, team: api.teamAt() });
       $('vMapInfo').textContent = vidAt == null ? '' :
         `video ${fmtMin(view.video.currentTime)} = ${(vidAt / 1000).toFixed(2)} km · you ${((you ?? 0) / 1000).toFixed(2)} km · ghost ${((ghost ?? 0) / 1000).toFixed(2)} km`;
     }

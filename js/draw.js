@@ -43,7 +43,7 @@ function arrow(ctx, x, y, angle, size) {
 // Route coloured by grade, with you and the ghost.
 //   view 'all'    - whole route, north up
 //   view 'follow' - heading up around you, `span` metres of road ahead
-export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null, trail = null } = {}) {
+export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all', span = 250, done = 0, streets = null, videoAt = null, anchor = 0.78, labelZone = null, trail = null, team = [] } = {}) {
   const ctx = fit(canvas);
   if (!ref) return message(ctx, 'Load a reference ride to see its route');
   if (!ref.hasRoute) return message(ctx, 'The reference ride has no GPS route');
@@ -97,6 +97,11 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
     trail.forEach(([x, y], i) => { const [px, py] = toScreen(x, y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
     ctx.stroke();
   }
+  for (const m of team || []) {                   // team rides: their own colour, smaller
+    const [tx, ty] = toScreen(...ref.xy(m.d));
+    if (tx < -20 || ty < -20 || tx > ctx.w + 20 || ty > ctx.h + 20) continue;
+    dot(ctx, tx, ty, view === 'all' ? 5 : 7, m.color);
+  }
   if (ghost != null) {
     let [gx, gy] = toScreen(...ref.xy(ghost));
     if (view === 'follow') {          // out of view: wait at the edge, in its direction
@@ -124,7 +129,7 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
 
 // The whole ride's elevation, plain (see-through grey over the video), with
 // dots for you and the ghost riding along it.
-export function drawElevationPlain(canvas, ref, you = null, ghost = null) {
+export function drawElevationPlain(canvas, ref, you = null, ghost = null, team = []) {
   const ctx = fit(canvas);
   if (!ref || !ref.hasAlt) return message(ctx, ref ? 'No altitude in this ride' : '');
   const P = ref.prof, n = ref.n;
@@ -145,12 +150,13 @@ export function drawElevationPlain(canvas, ref, you = null, ghost = null) {
   ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, ctx.w - R, ctx.h - 2);
   ctx.shadowBlur = 0;
   const at = d => { d = Math.max(0, Math.min(ref.total, d)); return [X(d), Y(ref.at('a', d))]; };
+  for (const m of team || []) { const [x, y] = at(m.d); dot(ctx, x, y, 5, m.color); }
   if (ghost != null) { const [x, y] = at(ghost); dot(ctx, x, y, 6, C.ghost); }
   if (you != null) { const [x, y] = at(you); dot(ctx, x, y, 6, '#FFFFFF'); }
 }
 
 // Elevation profile with you and the ghost.
-export function drawElevation(canvas, ref, you = null, ghost = null) {
+export function drawElevation(canvas, ref, you = null, ghost = null, team = []) {
   const ctx = fit(canvas);
   if (!ref || !ref.hasAlt) return message(ctx, ref ? 'No altitude in the reference ride' : '');
   const P = ref.prof, n = ref.n;
@@ -169,6 +175,7 @@ export function drawElevation(canvas, ref, you = null, ghost = null) {
   ctx.textAlign = 'left'; ctx.fillText('0 km', L, ctx.h - 4);
   ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, ctx.w - R, ctx.h - 4);
   const mark = (d, col) => { ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X(d), T); ctx.lineTo(X(d), ctx.h - B); ctx.stroke(); };
+  for (const m of team || []) { const d = Math.max(0, Math.min(ref.total, m.d)); dot(ctx, X(d), Y(ref.at('a', d)), 5, m.color); }
   if (ghost != null) mark(ghost, C.ghost);
   if (you != null) mark(you, '#fff');
 }
