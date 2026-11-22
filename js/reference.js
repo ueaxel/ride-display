@@ -307,6 +307,146 @@ export function profileFromFit(buffer, { untilKm = null, rider = RIDER, name = '
   return prof;
 }
 
+// ---------------------------------------------------------------- GPX
+
+// Points of a .gpx file: track points, else route points. Works without a
+// DOM (plain text scan), so the tests run in node too.
+export function readGpx(text) {
+  if (!/<gpx[\s>]/i.test(text)) throw new Error('This is not a .gpx file.');
+  const name = (text.match(/<metadata>[\s\S]*?<name>([\s\S]*?)<\/name>/i) || text.match(/<trk>\s*<name>([\s\S]*?)<\/name>/i) || [])[1];
+  const tag = /<(?:\w+:)?trkpt[\s>]/i.test(text) ? 'trkpt' : /<(?:\w+:)?rtept[\s>]/i.test(text) ? 'rtept' : null;
+  if (!tag) throw new Error('The .gpx file has no track or route points.');
+  const re = new RegExp(`<(?:\\w+:)?${tag}\\b([^>]*?)(?:/>|>([\\s\\S]*?)</(?:\\w+:)?${tag}>)`, 'gi');
+  const num = (body, t) => { const m = body.match(new RegExp(`<(?:\\w+:)?${t}>\\s*([-+0-9.eE]+)\\s*<`, 'i')); return m ? parseFloat(m[1]) : null; };
+  const pts = [];
+  let m;
+  while ((m = re.exec(text))) {
+    const attrs = m[1], body = m[2] || '';
+    const lat = parseFloat((attrs.match(/lat\s*=\s*["']([^"']+)/i) || [])[1]);
+    const lon = parseFloat((attrs.match(/lon\s*=\s*["']([^"']+)/i) || [])[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const tm = body.match(/<time>\s*([^<]+?)\s*<\/time>/i);
+    const time = tm ? Date.parse(tm[1]) / 1000 : null;
+    pts.push({ lat, lon, ele: num(body, 'ele'), time: Number.isFinite(time) ? time : null,
+      hr: num(body, 'hr'), cad: num(body, 'cad'), power: num(body, 'power') ?? num(body, 'watts') });
+  }
+  if (pts.length < 2) throw new Error('The .gpx file has too few points.');
+  return { name: name ? name.replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '', pts };
+}
+
+function haversine(a, b) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// Steady speed (m/s) at `watts` on `grade` (rise/run): pedal power = road load.
+export function steadySpeed(watts, grade, rider = RIDER, alt = 0) {
+  const m = rider.riderKg + (rider.extraKg ?? 1) + rider.bikeKg;
+  const th = Math.atan(grade), rho = 1.225 * Math.exp(-alt / 8434);
+  const net = v => watts * DRIVETRAIN - v * (m * G * (Math.sin(th) + rider.crr * Math.cos(th)) + 0.5 * rho * rider.cda * v * v);
+  let lo = 0, hi = 40;
+  for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (net(mid) > 0) lo = mid; else hi = mid; }
+  return lo;
+}
+// Power (W) needed to hold `v` m/s on `grade` (never below 0: coasting / braking).
+function roadPower(v, grade, rider, alt = 0) {
+  const m = rider.riderKg + (rider.extraKg ?? 1) + rider.bikeKg;
+  const th = Math.atan(grade), rho = 1.225 * Math.exp(-alt / 8434);
+  return Math.max(0, v * (m * G * (Math.sin(th) + rider.crr * Math.cos(th)) + 0.5 * rho * rider.cda * v * v) / DRIVETRAIN);
+}
+
+export const GPX_MAX_KMH = 50;     // a planned route's ghost doesn't descend faster than this
+export const GPX_MIN_KMH = 6;      // ... or crawl slower than this on the steepest climbs
+
+// Read a .gpx file and return its profile, like profileFromFit.
+//  - a recorded ride (points with times): its own times, speed, HR, cadence
+//    and power (power estimated when missing, as for .fit rides);
+//  - a planned route (no times, e.g. from RideWithGPS or Komoot): the ghost
+//    rides it at a steady `watts`, speed from the grade (same physics as
+//    IndoorRide), capped between GPX_MIN_KMH and GPX_MAX_KMH.
+export function profileFromGpx(text, { untilKm = null, rider = RIDER, name = '', watts = 160 } = {}) {
+  const gpx = readGpx(text);
+  const pts = gpx.pts;
+  let dist = 0;
+  const records = pts.map((p, i) => {
+    if (i) dist += haversine(pts[i - 1], p);
+    return { dist, lat: p.lat, lon: p.lon, alt: p.ele, hr: p.hr, cadence: p.cad, power: p.power, speed: null, _t: p.time };
+  });
+  const timed = pts.filter(p => p.time !== null).length >= 0.9 * pts.length
+    && pts[pts.length - 1].time > pts[0].time;
+  let estimated = false, planned = false, rec = records;
+  if (untilKm) rec = rec.filter(r => r.dist <= untilKm * 1000);
+  if (rec.length < 2) throw new Error('Nothing left before that distance.');
+  // drop repeated points (same distance) so distance always increases
+  rec = rec.filter((r, i) => i === 0 || r.dist > rec[i - 1].dist + 1e-6 || (timed && r._t > rec[i - 1]._t));
+  if (timed) {
+    let last = rec.find(r => r._t !== null)._t;
+    for (const r of rec) { if (r._t === null || r._t < last) r._t = last; last = r._t; }
+    const t0 = rec[0]._t;
+    let moving = 0;
+    rec.forEach((r, i) => {
+      r.ts = r._t - 631065600; r.elapsed = r._t - t0;
+      if (i) {
+        const dt = r._t - rec[i - 1]._t, dd = r.dist - rec[i - 1].dist;
+        r.speed = dt > 0 ? dd / dt : rec[i - 1].speed;
+        if (dt > 0 && dd / dt > 0.5) moving += dt;   // stopped (and long gaps without motion) don't count
+      }
+      r.moving = moving;
+    });
+    rec[0].speed = rec[1].speed;
+    for (const r of rec) r.speed = Math.min(r.speed ?? 0, 30);
+    const riding = rec.filter(r => r.speed > 1).length;
+    const realPower = rec.filter(r => (r.power ?? 0) > 0).length >= Math.max(5, 0.25 * riding);
+    if (!realPower && rec.some(r => r.alt !== null)) {
+      for (const r of rec) r.power = null;
+      estimatePower(rec, [], rider);
+      estimated = true;
+    }
+  } else {
+    planned = true;
+    if (!fillGaps(rec, 'alt')) rec.forEach(r => { r.alt = 0; });
+    const total = rec[rec.length - 1].dist;
+    const rd = rec.map(r => r.dist), ra = rec.map(r => r.alt);
+    const grid = [];
+    for (let g = 0; g <= total; g += 5) grid.push(g);
+    if (grid[grid.length - 1] < total) grid.push(total);
+    const alts = gaussianSmooth(grid, grid.map(g => interp(rd, ra, g)), 20);
+    const lastI = grid.length - 1;
+    const slope = grid.map((_, i) => {
+      const a = Math.max(i - 1, 0), b = Math.min(i + 1, lastI);
+      return b > a ? Math.max(-0.3, Math.min(0.3, (alts[b] - alts[a]) / (grid[b] - grid[a]))) : 0;
+    });
+    const vmax = GPX_MAX_KMH / 3.6, vmin = GPX_MIN_KMH / 3.6;
+    const vs = grid.map((_, i) => Math.max(vmin, Math.min(vmax, steadySpeed(watts, slope[i], rider, alts[i]))));
+    // no jumps in speed: at most about 0.5 m/s² either way (smooth over ±30 m)
+    const vsm = gaussianSmooth(grid, vs, 15);
+    const tg = [0];
+    for (let i = 1; i < grid.length; i++) tg.push(tg[i - 1] + 2 * (grid[i] - grid[i - 1]) / (vsm[i] + vsm[i - 1]));
+    const pg = vsm.map((v, i) => Math.min(watts * 1.5, roadPower(v, slope[i], rider, alts[i])));
+    for (const r of rec) {
+      r.moving = r.elapsed = interp(grid, tg, r.dist);
+      r.ts = r.moving;
+      r.speed = interp(grid, vsm, r.dist);
+      r.power = Math.round(interp(grid, pg, r.dist));
+      r.hr = null; r.cadence = null;
+    }
+  }
+  for (const r of rec) delete r._t;
+  const prof = buildProfile(rec, 5);
+  prof.name = name || gpx.name || 'GPX route';
+  prof.powerEstimated = estimated;
+  prof.source = 'gpx';
+  if (planned) { prof.planned = true; prof.plannedWatts = watts; }
+  else {
+    prof.start = rec[0].ts + 631065600;
+    prof.duration = rec[rec.length - 1].ts - rec[0].ts;
+  }
+  prof.lat1 = rec[0].lat; prof.lon1 = rec[0].lon;
+  return prof;
+}
+
 // ---------------------------------------------------------------- lookups
 
 // Power from a profile alone (speed, slope, change of speed every 5 m), for

@@ -2,7 +2,7 @@
 //   #trainer - tablet beside the indoor trainer (HR strap + trainer over Bluetooth)
 //   #ghost   - phone on the handlebar, chasing the reference ride (GPS + HR strap)
 //   #video   - Mac (or tablet): full-screen ride video that follows you, panels on top
-import { Reference, IndoorRide, RIDER, profileFromFit } from './reference.js';
+import { Reference, IndoorRide, RIDER, profileFromFit, profileFromGpx } from './reference.js';
 import { bluetoothAvailable, connectHeartRate, connectTrainer, connectCadence, startGps, keepScreenOn, DemoRider } from './sensors.js';
 import { StepFinder } from './hrmodel.js';
 import { RouteMatcher, MovingClock } from './ghost.js';
@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '38 (22 Nov 2026, Play also while riding)';
+export const APP_VERSION = '39 (22 Nov 2026, .gpx routes)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -722,7 +722,31 @@ function fillRefList() {
   sel.innerHTML = '';
   sel.innerHTML = '<option value="-1">No reference (free ride)</option>';
   refs.forEach((r, i) => { const o = document.createElement('option'); o.value = i; o.textContent = r.name; sel.appendChild(o); });
+  if (routes.length) {
+    const g = document.createElement('optgroup'); g.label = 'Routes (built in, .gpx)';
+    routes.forEach((r, i) => { const o = document.createElement('option'); o.value = 'route:' + i; o.textContent = '＋ ' + r.name; o.title = r.note || ''; g.appendChild(o); });
+    sel.appendChild(g);
+  }
   sel.value = String(Math.max(-1, Math.min(refs.length - 1, store.get('refIndex', 0))));
+}
+
+// Routes that come with the app (routes/index.json + .gpx files): pick one
+// and it becomes a reference, its ghost riding at the power set in the dialog.
+let routes = [];
+fetch('routes/index.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : []).then(list => {
+  routes = Array.isArray(list) ? list : [];
+  if ($('dlgRef').open) fillRefList();
+}).catch(() => {});
+
+async function loadRoute(i) {
+  const r = routes[i];
+  if (!r) return;
+  $('refInfo').textContent = `Loading ${r.name}…`;
+  try {
+    const res = await fetch('routes/' + encodeURIComponent(r.file));
+    if (!res.ok) throw new Error(`Could not load ${r.file} (offline?).`);
+    await loadRefFile(new File([await res.blob()], r.file));
+  } catch (e) { $('refInfo').innerHTML = `<span class="err">${e.message}</span>`; fillRefList(); }
 }
 
 // Stretches ridden back and forth in the current reference: show each on a
@@ -753,6 +777,7 @@ function showRefInfo(extra = '') {
   const pw = ref.hasPower ? Math.round(P.p.reduce((a, b) => a + b, 0) / P.p.length) : null;
   el.innerHTML = `<b>${ref.name}</b>: ${(ref.total / 1000).toFixed(2)} km, ${fmtTime(ref.totalTime)} moving` +
     (pw != null ? `, average ${pw} W${P.powerEstimated ? ' (estimated)' : ''}` : ', no power') +
+    (P.planned ? `<br>Planned route (.gpx, no times): the ghost rides it at a steady ${P.plannedWatts} W, between 6 and 50 km/h. No heart rate to compare.` : '') +
     (ref.hasRoute ? '' : ', <span class="err">no GPS route</span>') + (refNote ? `<br>${refNote}` : '') + (streetsNote ? `<br>${streetsNote}` : '') + (extra ? `<br>${extra}` : '');
   showTurnBacks();
 }
@@ -760,10 +785,19 @@ function showRefInfo(extra = '') {
 async function loadRefFile(file) {
   try {
     let buf = await file.arrayBuffer();
-    if (/\.zip$/i.test(file.name) || new Uint8Array(buf, 0, 2).join() === '80,75') buf = await fitFromZip(buf);
     const untilKm = parseFloat($('refUntil').value) || null;
-    const base = file.name.replace(/\.(fit|zip)$/i, '');
-    const prof = profileFromFit(buf, { untilKm, rider, name: base + (untilKm ? ` (to ${untilKm} km)` : '') });
+    const base = file.name.replace(/\.(fit|zip|gpx)$/i, '');
+    const head = new TextDecoder().decode(new Uint8Array(buf, 0, Math.min(buf.byteLength, 2000)));
+    let prof;
+    if (/\.gpx$/i.test(file.name) || /<gpx[\s>]/i.test(head)) {
+      const watts = Math.max(50, Math.min(600, parseFloat($('refWatts').value) || 160));
+      store.set('gpxWatts', watts);
+      prof = profileFromGpx(new TextDecoder().decode(buf), { untilKm, rider, watts, name: base });
+      prof.name = base + (prof.planned ? ` @ ${watts} W` : '') + (untilKm ? ` (to ${untilKm} km)` : '');
+    } else {
+      if (/\.zip$/i.test(file.name) || new Uint8Array(buf, 0, 2).join() === '80,75') buf = await fitFromZip(buf);
+      prof = profileFromFit(buf, { untilKm, rider, name: base + (untilKm ? ` (to ${untilKm} km)` : '') });
+    }
     await addRef(prof);
   } catch (e) {
     $('refInfo').innerHTML = `<span class="err">${e.message}</span>`;
@@ -907,9 +941,9 @@ $('btnResync').onclick = $('gResync').onclick = resync;
 $('btnBrake').onclick = toggleBrake;
 $('mCsv').onclick = saveCsv;
 $('btnFit').onclick = $('mFit').onclick = saveFit;
-$('btnRef').onclick = () => { fillRefList(); showRefInfo(); $('dlgRef').showModal(); };
+$('btnRef').onclick = () => { fillRefList(); showRefInfo(); $('refWatts').value = store.get('gpxWatts', 160); $('dlgRef').showModal(); };
 $('refClose').onclick = () => $('dlgRef').close();
-$('refList').onchange = e => selectRef(+e.target.value);
+$('refList').onchange = e => { const v = e.target.value; if (v.startsWith('route:')) loadRoute(+v.slice(6)); else selectRef(+v); };
 $('refFile').onchange = e => e.target.files[0] && loadRefFile(e.target.files[0]);
 $('refStreets').onclick = () => getStreets();
 $('refDelete').onclick = () => {

@@ -417,11 +417,13 @@
 
 <dialog id="dlgRef">
   <h2 style="margin-top:0">Reference ride</h2>
-  <p>Pick the original ride's <b>.fit</b> file, or the <b>.zip</b> straight from Garmin Connect (the activity → ⚙ → Export Original). Rides without a power meter get power estimated from speed, grade and weight, as in <code>tools/estimate_power.py</code>.</p>
+  <p>Pick the original ride's <b>.fit</b> file, or the <b>.zip</b> straight from Garmin Connect (the activity → ⚙ → Export Original), or a <b>.gpx</b> file: a recorded ride or a planned route (RideWithGPS, Komoot, Strava routes). Rides without a power meter get power estimated from speed, grade and weight, as in <code>tools/estimate_power.py</code>. A planned route has no times, so its ghost rides it at the steady power below.</p>
   <label>Saved references</label>
   <select id="refList"></select>
-  <label>New reference from a .fit file</label>
-  <input type="file" id="refFile" accept=".fit,.zip,application/octet-stream,application/zip">
+  <label>New reference from a .fit, .zip or .gpx file</label>
+  <input type="file" id="refFile" accept=".fit,.zip,.gpx,application/octet-stream,application/zip,application/gpx+xml">
+  <label>Ghost power for a planned .gpx route (W)</label>
+  <input type="number" id="refWatts" step="5" min="50" max="600" value="160">
   <label>Use the ride only up to … km (optional, e.g. to skip a long descent)</label>
   <input type="number" id="refUntil" step="0.01" min="0" placeholder="whole ride">
   <p id="refInfo"></p>

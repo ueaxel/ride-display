@@ -18,6 +18,15 @@ The [`ride-video-maker`](ride-video-maker/) folder has the tool that turns a rid
 
 Tap the purple reference button and pick the original ride's `.fit` file, or the `.zip` you get from Garmin Connect → activity → ⚙ → *Export Original*, without unzipping it. This is the same file you drag into `Make Ride Repro Reference.command`. The page builds the same profile as `tools/make_reference.py`. If the ride has no power, it estimates power the same way `tools/estimate_power.py` does. Optional: *use the ride only up to … km*. The page keeps up to 6 references on the device.
 
+### GPX routes
+
+The same button also takes a **.gpx** file:
+
+- **A recorded ride** (points with times, e.g. exported from Strava): used like a .fit ride, with its own times, speed and heart rate. Power is estimated when the file has none.
+- **A planned route** (no times, e.g. RideWithGPS, Komoot or Strava routes): there's no original rider, so the ghost rides the route at a **steady power** you set in the dialog (*Ghost power for a planned .gpx route*, 160 W by default). Its speed comes from the grade with the same physics as the trainer (so pedalling that power keeps you level with it), between 6 and 50 km/h. The reference is named after the power, e.g. *OYJ Dublin Grade Light @ 160 W*; load it again with another power to get a faster or slower ghost.
+
+**Built-in routes:** the `.gpx` files in [`routes/`](routes/) listed in `routes/index.json` appear in the reference list under *Routes* on every device, so you don't need to copy the file to the tablet or phone. Pick one to make it a reference. To add a route, put its .gpx in `routes/` and add a line to `routes/index.json`.
+
 When you load a reference, the page also downloads the streets within about 200 m of the route from OpenStreetMap (Overpass API) and stores them on the device. That download needs internet, so do it at home. If it fails, use **Download streets** in the same dialog.
 
 ## Riding
