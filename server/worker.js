@@ -29,8 +29,9 @@ async function ride(request, env, key) {
   if (!o) return new Response('Not found', { status: 404 });
   headers.ETag = o.httpEtag;
   if (request.headers.has('Range') && o.range) {
-    const start = 'suffix' in o.range ? o.size - o.range.suffix : (o.range.offset || 0);
-    const len = 'suffix' in o.range ? o.range.suffix : (o.range.length ?? o.size - start);
+    const r = o.range;
+    const len = r.suffix != null ? Math.min(r.suffix, o.size) : (r.length != null ? r.length : o.size - (r.offset || 0));
+    const start = r.suffix != null ? o.size - len : (r.offset || 0);
     return new Response(o.body, { status: 206, headers: { ...headers, 'Content-Range': `bytes ${start}-${start + len - 1}/${o.size}`, 'Content-Length': String(len) } });
   }
   return new Response(o.body, { headers: { ...headers, 'Content-Length': String(o.size) } });
