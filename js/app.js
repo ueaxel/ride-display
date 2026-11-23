@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '47 · 261123_0958 (ride links, forward view for streamed rides)';
+export const APP_VERSION = '48 · 261123_1007 (ride links set route-grade resistance; Brake works in every mode)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -300,7 +300,7 @@ function switchRef(newRef, p, key) {
 
 // What the trainer should do now; sent when it changed enough or every 10 s.
 function controlTarget(dist, speed) {
-  if (braking) return ctlMode === 'grade' || !ref ? { kind: 'grade', v: 0.04 } : { kind: 'power', v: 0 };
+  if (braking) return ctlMode === 'grade' || ctlMode === 'off' || !ref ? { kind: 'grade', v: 0.04 } : { kind: 'power', v: 0 };
   if (ctlMode === 'fixed') return { kind: 'power', v: fixedW };
   if (!ref || finished) return null;
   const d = Math.min(dist, ref.total);
@@ -317,7 +317,7 @@ function controlTarget(dist, speed) {
 
 function control(dist, speed) {
   const c = links.trainer?.control;
-  if (!c || ctlMode === 'off' || demo) return;
+  if (!c || (ctlMode === 'off' && !braking) || demo) return;          // Brake works in every mode
   const t = controlTarget(dist, speed);
   if (!t) return;
   const now = Date.now();

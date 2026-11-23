@@ -274,8 +274,10 @@ export function initVideoScreen(api) {
       const r = (await listOnline()).find(x => x.file.name === linked);
       if (!r) throw new Error(`${linked} is not among the rides on this site`);
       await openOnline(r);
+      // a shared ride: the trainer follows the road unless you've chosen otherwise
+      if (api.ctlMode === 'off') window.__rideDisplay?.setCtlMode('grade');
       $('readyTitle').textContent = r.title;
-      $('readyNote').textContent = 'Connect your trainer and heart-rate strap (Chrome asks which device), then press Start when you ride.';
+      $('readyNote').textContent = 'Connect your trainer and heart-rate strap (Chrome asks which device), then press Start when you ride. The trainer follows the road\'s slope (Resistance: route grade).';
     } catch (e) { $('readyTitle').textContent = 'Could not open the ride'; $('readyNote').textContent = e.message; }
   })();
   const relay = (btn, target) => { $(btn).onclick = () => { $(target).click(); $(btn).textContent = $(btn).textContent.replace(/^Connect/, 'Connecting'); }; };
