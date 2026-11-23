@@ -140,8 +140,8 @@ export class Clip {
     return Math.atan2(bx - ax, by - ay);
   }
   setFile(file) {
-    if (this.url) URL.revokeObjectURL(this.url);
-    this.file = file; this.url = URL.createObjectURL(file);
+    if (this.url && this.url.startsWith('blob:')) URL.revokeObjectURL(this.url);
+    this.file = file; this.url = file.remote ? file.url : URL.createObjectURL(file);
   }
   toJSON() {
     const { id, name, fitName, v0, duration, created, synced, worldLock, forward, roll, tilt, segs, baseV0, embedded, prof, grav } = this;

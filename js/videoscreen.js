@@ -8,6 +8,7 @@ import { buildClips, pairByHand, linkChapters, loadClips, saveClip, deleteClip, 
 import { downloadStreets, saveStreets, loadStreets } from './streets.js';
 import * as D from './draw.js';
 import { chooseLibrary, libraryFolder, scanLibrary, setValidated } from './library.js';
+import { listOnline } from './online.js';
 
 const DEFAULT_LAYOUT = {
   numbers: { x: 0.012, y: 0.085, w: 0.44, h: 0.17, on: true },
@@ -227,7 +228,34 @@ export function initVideoScreen(api) {
   $('libChoose').onclick = async () => { try { await chooseLibrary(); await showLibrary(true); } catch (e) { if (e.name !== 'AbortError') $('libNote').textContent = e.message; } };
   $('libOpen').onclick = () => showLibrary(true);
 
-  $('btnClips').onclick = () => { fillClipList(); $('dlgClips').showModal(); showLibrary(false); };
+  // ---------------------------------------------------------------- online rides (streamed)
+  async function showOnline() {
+    const rides = await listOnline();
+    $('onlineBox').style.display = rides.length ? '' : 'none';
+    if (!rides.length) return;
+    $('onlineNote').textContent = 'Streamed from this site: nothing to download first.';
+    const box = $('onlineList'); box.innerHTML = '';
+    for (const r of rides) {
+      const row = document.createElement('div'); row.className = 'cliprow librow';
+      row.innerHTML = `<div><span class="lib-title"></span><br><span class="muted"></span></div>`;
+      row.querySelector('.lib-title').textContent = r.title;
+      row.querySelector('.muted').textContent = r.note || `${(r.file.size / 1e6).toFixed(0)} MB`;
+      const go = document.createElement('button'); go.className = 'primary'; go.textContent = 'Ride this';
+      go.onclick = async () => {
+        $('onlineNote').textContent = `Opening ${r.title}…`;
+        try {
+          await refreshClips([r.file]);
+          const i = clips.findIndex(c => c.file === r.file);
+          if (i < 0) throw new Error('no ride data in this video');
+          startClip(i, Math.max(0, clips[i].videoRange[0]));
+          $('dlgClips').close();
+        } catch (e) { $('onlineNote').textContent = `Could not open ${r.title}: ${e.message}`; }
+      };
+      row.append(go); box.appendChild(row);
+    }
+  }
+
+  $('btnClips').onclick = () => { fillClipList(); $('dlgClips').showModal(); showLibrary(false); showOnline(); };
   $('vClipsClose').onclick = () => $('dlgClips').close();
   $('vFolder').style.display = folderPickerAvailable() ? '' : 'none';
   $('vFolder').onclick = async () => {
