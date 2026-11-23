@@ -709,6 +709,25 @@ def make_phone(src):
 
 
 def main():
+    if '--share' in sys.argv:
+        import share_ride
+        args = sys.argv[1:]
+        width = int(args[args.index('--width') + 1]) if '--width' in args else 3840
+        files = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or args[i - 1] != '--width')]
+        if not files:
+            raise SystemExit('usage: make_ride_video.py --share RideVideo_....mp4 [--width 3840]')
+        ff = ffmpeg_bin()
+        if not ff:
+            raise SystemExit('Needs ffmpeg. Install it once with:  brew install ffmpeg')
+        part = None
+        if '--piece' in args:                            # --piece I/N DIR  (I = 'join' to join)
+            a, b = args[args.index('--piece') + 1].split('/')
+            part = (None if a == 'join' else int(a), int(b), args[args.index('--piece') + 2])
+            files = [f for f in files if f not in (args[args.index('--piece') + 1], part[2])]
+        for f in files:
+            share_ride.make_share(f, ff, read_ride_meta, mp4_info, RIDE_UUID, width=width, part=part,
+                                  hide_lights='--no-light-check' not in args)
+        return
     if '--phone' in sys.argv:
         files = [a for a in sys.argv[1:] if not a.startswith('--')]
         if not files:

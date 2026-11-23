@@ -46,9 +46,21 @@ Converting 360° video takes roughly as long as the ride on a recent Mac (it use
 
 `Make Phone Version.command` (or `python3 make_ride_video.py --phone RideVideo_….mp4`) makes `RideVideo_…_phone.mp4` next to it: 2560 × 1280 H.264, about 2.7 GB per hour, with the same ride inside. Copy it onto a phone or tablet (iPhone: AirDrop → Save to Files) and open it on the video screen (Clips → pick it): no streaming needed, ▶ plays the ride.
 
+## Share copy (for other riders)
+
+`Make Share Version.command` (or `python3 make_ride_video.py --share RideVideo_….mp4 [--width 3840]`) makes `RideVideo_…_share.mp4` next to it, for streaming to the riders you let in:
+
+- **Steady speed, no stops:** the video is re-cut by distance so every metre of road gets the same amount of video (at about the speed you mostly rode, 22–50 km/h). Stops at lights and junctions disappear, and nobody can tell where the original ride slowed down, stopped or rolled through. In the app it plays at the rider's own speed as always.
+- **Traffic lights covered:** an object detector (YOLOX-S, Apache 2.0) looks for traffic lights three times a second over the whole 360° picture; each one, and its path between checks, gets a flat grey patch, so red or green can't be seen. Set to catch too many rather than too few, but **watch the copy once before sharing**: a light it misses stays visible. It also covers some things that only look like lights (porch lamps, signs). For a route without traffic lights add `--no-light-check`: much quicker, no patches.
+- **Only the route inside:** position, distance and altitude at that steady speed. No time of day, speed, power, heart rate or cadence of your ride, and no sound.
+
+Needs, once: `python3 -m pip install --user numpy onnxruntime`. The detector model (35 MB) downloads itself on first use into `models/`. Takes roughly as long as the ride on a recent Mac.
+
 ## Files
 
 - `make_ride_video.py` — the tool
 - `estimate_power.py` — reads .fit files (and, run on its own, estimates power for rides recorded without a power meter: `python3 estimate_power.py RIDE.fit OUT.fit --rider-kg 75`)
 - `Make Ride Video.command` — double-click starter for the Mac
 - `Make Phone Version.command` — double-click: phone-size copy of a ride video
+- `share_ride.py` — the share copy (steady speed, traffic lights covered, route only)
+- `Make Share Version.command` — double-click: share copy of a ride video
