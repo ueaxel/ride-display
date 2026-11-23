@@ -46,7 +46,7 @@ OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.sy
             'https://maps.mail.ru/osm/tools/overpass/api/interpreter']
 NEAR = 35                    # m: the route passes a signal when this close
 BEFORE, AFTER = 150, 80      # m of road before / after a signal where its lights can be seen
-SIGNAL_SCORE = 0.12          # detector threshold near a signal: a light is expected there
+SIGNAL_SCORE = 0.18          # detector threshold near a signal: a light is expected there
 
 
 def say(msg):
@@ -306,14 +306,23 @@ class Detector:
         return out
 
 
-def patches(prev, cur):
+MAX_BOX = 0.05               # a light is never wider or taller than this share of the picture width
+
+
+def patches(prev, cur, w=3840):
     """Grey patches for the frames between two detections: every light seen
-    at either end, and the stretch between the two sightings of one light."""
-    out = list(prev) + list(cur)
-    for (x, y, w, h) in prev:
-        near = [b for b in cur if abs(b[0] - x) < 4 * max(w, h) + 40 and abs(b[1] - y) < 4 * max(w, h) + 40]
-        for (x2, y2, w2, h2) in near:
-            out.append((min(x, x2), min(y, y2), max(x + w, x2 + w2) - min(x, x2), max(y + h, y2 + h2) - min(y, y2)))
+    at either end, and the stretch between the two sightings of one light.
+    Boxes too big to be a light are dropped; a stretch is only added when it
+    stays small (the light moved a little, not across the picture)."""
+    big = MAX_BOX * w
+    prev = [b for b in prev if max(b[2], b[3]) <= big]
+    cur = [b for b in cur if max(b[2], b[3]) <= big]
+    out = prev + cur
+    for (x, y, bw, bh) in prev:
+        for (x2, y2, w2, h2) in cur:
+            hw, hh = max(x + bw, x2 + w2) - min(x, x2), max(y + bh, y2 + h2) - min(y, y2)
+            if hw * hh <= 3 * (bw * bh + w2 * h2):
+                out.append((min(x, x2), min(y, y2), hw, hh))
     return out
 
 
@@ -389,7 +398,7 @@ def encode(ff, src, sfps, frames, w, h, sess, tmp, look=None, hits=None):
                             hits[k] = 1
                     else:
                         boxes = []
-                    rects = patches(prev, boxes)
+                    rects = patches(prev, boxes, w)
                     for fr in buf:
                         if rects:
                             a = np.frombuffer(fr, np.uint8).copy()
