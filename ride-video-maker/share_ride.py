@@ -37,7 +37,7 @@ FIT_EPOCH = 631065600
 MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx'
 MODEL = Path(__file__).resolve().parent / 'models' / 'yolox_s.onnx'
 TRAFFIC_LIGHT = 9            # COCO class
-MIN_SCORE = 0.2              # low on purpose: a grey patch too many is harmless, one too few is not
+MIN_SCORE = 0.3              # low on purpose: a grey patch too many is harmless, one too few is not
 DETECT_HZ = 3                # detections per second of output video
 PAD = 0.5                    # patch margin, fraction of the light's size on each side
 FPS = 30
@@ -179,18 +179,19 @@ def load_detector():
 
 class Detector:
     """Traffic lights in an equirectangular frame (yuv420p planes), looked for
-    in square tiles along the band where they appear: 55° above the horizon to
-    15° below, all the way round."""
+    in square tiles over the whole picture: the camera may be mounted tilted
+    or sideways (the app levels it later), so the horizon can be anywhere."""
     SIZE = 640
 
     def __init__(self, sess, w, h):
         import numpy as np
         self.np, self.sess, self.w, self.h = np, sess, w, h
         self.name = sess.get_inputs()[0].name
-        self.y0 = int(h * 35 / 180)
-        self.side = int(h * 105 / 180) - self.y0
+        self.side = int(h * 70 / 180)
         n = math.ceil(w / (self.side * 0.85))
         self.xs = [int(i * w / n) for i in range(n)]
+        rows = math.ceil((h - self.side) / (self.side * 0.85)) + 1
+        self.ys = [int(i * (h - self.side) / (rows - 1)) for i in range(rows)]
         pick = (np.arange(self.SIZE) * self.side / self.SIZE).astype(int)
         self.pick = pick
         grids, strides = [], []
@@ -204,7 +205,14 @@ class Detector:
     def boxes(self, Y, U, V):
         np = self.np
         out = []
-        rows = self.y0 + self.pick
+        for y0 in self.ys:
+            out += self._row(Y, U, V, y0)
+        return out
+
+    def _row(self, Y, U, V, y0):
+        np = self.np
+        out = []
+        rows = y0 + self.pick
         for x0 in self.xs:
             cols = (x0 + self.pick) % self.w
             y = Y[rows][:, cols].astype(np.float32)
@@ -220,7 +228,7 @@ class Detector:
             wh = np.exp(p[keep, 2:4]) * self.stride[keep]
             f = self.side / self.SIZE
             for (cx, cy), (bw, bh) in zip(xy * f, wh * f):
-                out.append((x0 + cx - bw / 2, self.y0 + cy - bh / 2, bw, bh))
+                out.append((x0 + cx - bw / 2, y0 + cy - bh / 2, bw, bh))
         return out
 
 
