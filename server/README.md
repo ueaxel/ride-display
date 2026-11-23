@@ -13,7 +13,7 @@ Ride videos live in an R2 bucket (no charge for streaming them).
    - `index.json`, the list of rides the app shows:
      ```json
      { "rides": [
-       { "file": "RideVideo_261120_1653_Weldon_stream.mp4", "title": "Weldon Ave Roundtrip", "note": "Oakland · 9 min" }
+       { "file": "RideVideo_261120_1653_Weldon_stream.mp4", "title": "Weldon Ave Roundtrip", "note": "Oakland · 9 min", "forward": 180 }
      ] }
      ```
 3. **Worker.** Workers & Pages → *Create* → *Start with Hello World* → name `rides` → *Deploy*.
@@ -27,6 +27,12 @@ Ride videos live in an R2 bucket (no charge for streaming them).
    (Zero Trust may ask you once to pick a team name and the Free plan.)
 6. **Try it.** Open `https://rides.<your-subdomain>.workers.dev` → enter your email →
    code from the email → the app opens. Video screen → *Clips* → **Online rides** → *Ride this*.
+
+`forward` (degrees) turns the 360° view to look along the road when the ride opens
+(180 when the camera faces the rider). A rider's own "set forward" still wins.
+
+**A link to one ride**, opening the app with it loaded and buttons to connect the
+trainer and heart-rate strap: `https://rides.<your-subdomain>.workers.dev/?ride=RideVideo_….mp4#video`
 
 ## Let someone in / out
 

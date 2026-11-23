@@ -245,17 +245,42 @@ export function initVideoScreen(api) {
       const go = document.createElement('button'); go.className = 'primary'; go.textContent = 'Ride this';
       go.onclick = async () => {
         $('onlineNote').textContent = `Opening ${r.title}…`;
-        try {
-          await refreshClips([r.file]);
-          const i = clips.findIndex(c => c.file === r.file);
-          if (i < 0) throw new Error('no ride data in this video');
-          startClip(i, Math.max(0, clips[i].videoRange[0]));
-          $('dlgClips').close();
-        } catch (e) { $('onlineNote').textContent = `Could not open ${r.title}: ${e.message}`; }
+        try { await openOnline(r); $('dlgClips').close(); }
+        catch (e) { $('onlineNote').textContent = `Could not open ${r.title}: ${e.message}`; }
       };
       row.append(go); box.appendChild(row);
     }
   }
+
+  // open a streamed ride; its forward direction (from rides/index.json) unless you've set your own
+  async function openOnline(r) {
+    await refreshClips([r.file]);
+    const i = clips.findIndex(c => c.file === r.file);
+    if (i < 0) throw new Error('no ride data in this video');
+    const c = clips[i];
+    if (r.forward != null && !c.forward) {
+      for (const m of c.chapters || [c]) { m.forward = r.forward * Math.PI / 180; await saveClip(m); }
+    }
+    startClip(i, Math.max(0, c.videoRange[0]));
+  }
+
+  // a link straight to one ride: …/?ride=RideVideo_….mp4#video opens it and offers the sensors
+  const linked = new URLSearchParams(location.search).get('ride');
+  if (linked) (async () => {
+    if (location.hash !== '#video') location.hash = 'video';
+    $('readyTitle').textContent = 'Opening the ride…';
+    $('dlgReady').showModal();
+    try {
+      const r = (await listOnline()).find(x => x.file.name === linked);
+      if (!r) throw new Error(`${linked} is not among the rides on this site`);
+      await openOnline(r);
+      $('readyTitle').textContent = r.title;
+      $('readyNote').textContent = 'Connect your trainer and heart-rate strap (Chrome asks which device), then press Start when you ride.';
+    } catch (e) { $('readyTitle').textContent = 'Could not open the ride'; $('readyNote').textContent = e.message; }
+  })();
+  const relay = (btn, target) => { $(btn).onclick = () => { $(target).click(); $(btn).textContent = $(btn).textContent.replace(/^Connect/, 'Connecting'); }; };
+  relay('readyTrainer', 'btnTrainer'); relay('readyHr', 'btnHr'); relay('readyCad', 'btnCad');
+  $('readyGo').onclick = () => $('dlgReady').close();
 
   $('btnClips').onclick = () => { fillClipList(); $('dlgClips').showModal(); showLibrary(false); showOnline(); };
   $('vClipsClose').onclick = () => $('dlgClips').close();
