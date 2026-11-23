@@ -26,7 +26,8 @@ export class RemoteFile {
 
 // [{ title, file: RemoteFile, note, forward }] or [] when this server has no rides
 // (forward: degrees to turn the 360° view so it looks along the road, e.g. 180
-// when the camera faces the rider)
+// when the camera faces the rider; lookUp: degrees the view starts above level,
+// for a camera mounted tilted down)
 export async function listOnline() {
   let list;
   try {
@@ -41,7 +42,7 @@ export async function listOnline() {
     if (!size) {
       try { const h = await fetch(url, { method: 'HEAD', credentials: 'same-origin' }); size = +h.headers.get('Content-Length'); } catch (e) { /* */ }
     }
-    if (size) out.push({ title: it.title || it.file, note: it.note || '', forward: it.forward ?? null, file: new RemoteFile(url, it.file, size, it.modified || 0) });
+    if (size) out.push({ title: it.title || it.file, note: it.note || '', forward: it.forward ?? null, lookUp: it.lookUp ?? null, file: new RemoteFile(url, it.file, size, it.modified || 0) });
   }
   return out;
 }

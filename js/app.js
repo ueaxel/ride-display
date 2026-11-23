@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '48 · 261123_1007 (ride links set route-grade resistance; Brake works in every mode)';
+export const APP_VERSION = '49 · 261123_1010 (route grade by default; streamed rides can start looking up)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -50,7 +50,7 @@ let S, running, clock, indoor, matcher, offset, finished, steps, demo = null, de
 let quiet = false;
 // Trainer control from the tablet: 'off' (listen only), 'ghost' (ERG = original
 // ride's power just ahead), 'grade' (route slope), 'fixed' (ERG at fixedW).
-let ctlMode = store.get('ctlMode', 'off'), fixedW = store.get('fixedW', 150), ctlSent = { v: null, at: 0 };           // tests: skip drawing while fast-forwarding
+let ctlMode = store.get('ctlMode', 'grade'), fixedW = store.get('fixedW', 150), ctlSent = { v: null, at: 0 };           // tests: skip drawing while fast-forwarding
 let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = null;
 
 function newRide() {

@@ -67,7 +67,8 @@ export class VideoView {
     this.video.load();
   }
   // forward: the yaw that looks along the road for this video (camera may face backwards)
-  resetView(forward = 0) { this.yaw = forward; this.pitch = -0.08; this.fov = 80; this.onViewChange?.(); }
+  // lookUp: starting pitch (radians, + = up), e.g. for a camera mounted tilted down
+  resetView(forward = 0, lookUp = -0.08) { this.yaw = forward; this.pitch = lookUp; this.fov = 80; this.onViewChange?.(); }
   // Rotation that levels the picture: roll about the riding direction, tilt
   // about the sideways axis (column-major mat3 for WebGL).
   levelMatrix() {

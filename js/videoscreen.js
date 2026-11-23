@@ -85,7 +85,7 @@ export function initVideoScreen(api) {
   $('vPanelsReset').onclick = () => { layout = JSON.parse(JSON.stringify(isPhone() ? PHONE_LAYOUT : DEFAULT_LAYOUT)); panels.forEach(place); saveLayout(); fillPanelMenu(); draw(); };
   $('btnPanels').onclick = () => { fillPanelMenu(); $('dlgPanels').showModal(); };
   $('vPanelsClose').onclick = () => $('dlgPanels').close();
-  $('btnLook').onclick = () => view.resetView(clips[cur]?.forward || 0);
+  $('btnLook').onclick = () => view.resetView(clips[cur]?.forward || 0, clips[cur]?.lookUp ?? -0.08);
   // horizon correction, per ride (all chapters)
   function updateLevel() {
     $('lvRoll').value = Math.round(view.roll * 1800 / Math.PI) / 10; $('lvTilt').value = Math.round(view.tilt * 1800 / Math.PI) / 10;
@@ -261,6 +261,7 @@ export function initVideoScreen(api) {
     if (r.forward != null && !c.forward) {
       for (const m of c.chapters || [c]) { m.forward = r.forward * Math.PI / 180; await saveClip(m); }
     }
+    if (r.lookUp != null) for (const m of c.chapters || [c]) m.lookUp = r.lookUp * Math.PI / 180;
     startClip(i, Math.max(0, c.videoRange[0]));
   }
 
@@ -314,7 +315,7 @@ export function initVideoScreen(api) {
     cur = i; setTimeout(updateTurnBtn);
     const c = clips[i];
     view.load(c.url);
-    view.resetView(c.forward || 0); applyClipView(c);
+    view.resetView(c.forward || 0, c.lookUp ?? -0.08); applyClipView(c);
     api.switchRef(c.ref, p, 'clip:' + c.id);
     $('vMsg').textContent = '';
     choices = [];
