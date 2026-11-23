@@ -141,13 +141,15 @@ export function initVideoScreen(api) {
       (clips.length ? `${clips.length} clip${clips.length > 1 ? 's' : ''} ready.` : unmatched.length ? '' : 'No videos found.') +
       (unmatched.length ? ` ${unmatched.length} video${unmatched.length > 1 ? 's need' : ' needs'} its ride chosen below.` : '');
     fillClipList();
-    // streets for each clip (online, once)
-    for (const c of clips) {
-      const have = await loadStreets('clip:' + c.id);
-      if (!(have && have.ways.length) && navigator.onLine && c.ref.hasRoute) {
-        try { await saveStreets('clip:' + c.id, await downloadStreets(c.prof)); } catch (e) { /* later */ }
+    // streets for each clip (online, once), in the background: riding can start meanwhile
+    (async () => {
+      for (const c of clips) {
+        const have = await loadStreets('clip:' + c.id);
+        if (!(have && have.ways.length) && navigator.onLine && c.ref.hasRoute) {
+          try { await saveStreets('clip:' + c.id, await downloadStreets(c.prof)); } catch (e) { /* later */ }
+        }
       }
-    }
+    })();
   }
   let unmatched = [], rideChoices = [];
   function fillClipList() {
