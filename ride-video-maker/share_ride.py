@@ -29,6 +29,7 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import urllib.parse
 import urllib.request
 
 import estimate_power
@@ -41,6 +42,11 @@ MIN_SCORE = 0.25             # low on purpose: a grey patch too many is harmless
 DETECT_HZ = 3                # detections per second of output video
 PAD = 0.5                    # patch margin, fraction of the light's size on each side
 FPS = 30
+OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter',
+            'https://maps.mail.ru/osm/tools/overpass/api/interpreter']
+NEAR = 35                    # m: the route passes a signal when this close
+BEFORE, AFTER = 150, 80      # m of road before / after a signal where its lights can be seen
+SIGNAL_SCORE = 0.12          # detector threshold near a signal: a light is expected there
 
 
 def say(msg):
@@ -109,11 +115,12 @@ def video_time(segs, e):
 
 def plan_frames(route, segs, speed, fps):
     """For each output frame: the source video second, by distance at a steady
-    speed. Returns frames, new segments (synthetic ride s = distance / speed)."""
+    speed. Returns frames, new segments (synthetic ride s = distance / speed),
+    and each frame's distance along the ride."""
     at = first_time_at(route)
     total = route[-1][1]
     step = speed / fps
-    frames, newsegs, run = [], [], None
+    frames, dists, newsegs, run = [], [], [], None
     k = 0
     while k * step <= total:
         d = k * step
@@ -125,9 +132,10 @@ def plan_frames(route, segs, speed, fps):
                 run = {'v': round(len(frames) / fps, 3), 'r': round(d / speed, 3), 'dur': 0}
                 newsegs.append(run)
             frames.append(t)
+            dists.append(d)
             run['dur'] = round((len(frames) / fps) - run['v'], 3)
         k += 1
-    return frames, newsegs
+    return frames, newsegs, dists
 
 
 def route_fit(route, speed, start_ts, tz):
@@ -159,6 +167,73 @@ def route_fit(route, speed, start_ts, tz):
 
 
 # ------------------------------------------------------------ traffic lights
+
+def fetch_signals(route, cache):
+    """Traffic signals near the route from OpenStreetMap (junction signals and
+    signalled crossings), kept in cache (a .json next to the video).
+    [(lat, lon)], or None when the map can't be reached."""
+    if cache.exists():
+        return [tuple(x) for x in json.loads(cache.read_text())]
+    pts = [(r[2], r[3]) for r in route if r[2] is not None]
+    if not pts:
+        return None
+    s, n = min(p[0] for p in pts) - 0.002, max(p[0] for p in pts) + 0.002
+    w, e = min(p[1] for p in pts) - 0.002, max(p[1] for p in pts) + 0.002
+    q = (f'[out:json][timeout:60];(node[highway=traffic_signals]({s},{w},{n},{e});'
+         f'node[crossing=traffic_signals]({s},{w},{n},{e}););out;')
+    for url in OVERPASS:
+        try:
+            req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(),
+                                         headers={'User-Agent': 'ride-display share copy'})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                sig = [(el['lat'], el['lon']) for el in json.load(r)['elements']]
+            cache.write_text(json.dumps(sig))
+            return sig
+        except Exception:
+            continue
+    return None
+
+
+def signal_passes(route, signals):
+    """Where the ride passes a signal: [(distance m, (lat, lon))], one per pass
+    (a signal passed twice, out and back, counts twice)."""
+    pts = [r for r in route if r[2] is not None]
+    out = []
+    for lat, lon in signals:
+        kx = 111320 * math.cos(math.radians(lat))
+        near = [(math.hypot((r[2] - lat) * 110540, (r[3] - lon) * kx), r[1]) for r in pts]
+        near = [(m, d) for m, d in near if m < NEAR]
+        near.sort(key=lambda x: x[1])
+        group = []
+        for m, d in near + [(0, float('inf'))]:
+            if group and d - group[-1][1] > 2 * NEAR + 50:
+                out.append((min(group)[1], (lat, lon)))
+                group = []
+            group.append((m, d))
+    # nearby signals at one junction → one pass
+    out.sort()
+    merged = []
+    for d, ll in out:
+        if merged and d - merged[-1][0] < 40:
+            continue
+        merged.append((d, ll))
+    return merged
+
+
+def look_plan(dists, passes):
+    """Per output frame: detector threshold (near a signal) or None, and which pass."""
+    look, which = [None] * len(dists), [None] * len(dists)
+    for j, (dp, _) in enumerate(passes):
+        lo = bisect.bisect_left(dists, dp - BEFORE)
+        hi = bisect.bisect_right(dists, dp + AFTER)
+        for k in range(lo, hi):
+            look[k], which[k] = SIGNAL_SCORE, j
+    return look, which
+
+
+def mmss(t):
+    return f'{int(t // 60)}:{int(t % 60):02d}'
+
 
 def load_detector():
     try:
@@ -202,14 +277,13 @@ class Detector:
             strides.append(np.full((g * g, 1), s))
         self.grid, self.stride = np.concatenate(grids), np.concatenate(strides)
 
-    def boxes(self, Y, U, V):
-        np = self.np
+    def boxes(self, Y, U, V, min_score=None):
         out = []
         for y0 in self.ys:
-            out += self._row(Y, U, V, y0)
+            out += self._row(Y, U, V, y0, MIN_SCORE if min_score is None else min_score)
         return out
 
-    def _row(self, Y, U, V, y0):
+    def _row(self, Y, U, V, y0, min_score):
         np = self.np
         out = []
         rows = y0 + self.pick
@@ -221,7 +295,7 @@ class Detector:
             bgr = np.stack([y + 1.772 * u, y - 0.344 * u - 0.714 * v, y + 1.402 * v], 0).clip(0, 255)
             p = self.sess.run(None, {self.name: bgr[None]})[0][0]
             score = p[:, 4] * p[:, 5 + TRAFFIC_LIGHT]
-            keep = score > MIN_SCORE
+            keep = score > min_score
             if not keep.any():
                 continue
             xy = (p[keep, :2] + self.grid[keep]) * self.stride[keep]
@@ -273,9 +347,11 @@ def source_fps(ff, src):
     return float(a) / float(b or 1)
 
 
-def encode(ff, src, sfps, frames, w, h, sess, tmp):
+def encode(ff, src, sfps, frames, w, h, sess, tmp, look=None, hits=None):
     """Write the output frames (source seconds) to tmp, traffic lights covered.
-    Returns (lights seen, checks made)."""
+    look[k]: detector threshold for frame k, or None = don't look there (no
+    signal nearby); look=None looks everywhere. hits[k] += 1 where lights were
+    found. Returns (lights seen, checks made)."""
     import numpy as np
     ss = max(0.0, frames[0] - 1.0)
     dec_args = [ff, '-v', 'error'] + (['-ss', f'{ss:.3f}'] if ss > 0 else []) + [
@@ -306,8 +382,13 @@ def encode(ff, src, sfps, frames, w, h, sess, tmp):
                     continue
                 buf.append(cur)
                 if k % every == 0 or k == len(frames) - 1:
-                    boxes = det.boxes(*planes(np.frombuffer(cur, np.uint8)))
-                    lights, checks = lights + bool(boxes), checks + 1
+                    if look is None or look[k] is not None:
+                        boxes = det.boxes(*planes(np.frombuffer(cur, np.uint8)), None if look is None else look[k])
+                        lights, checks = lights + bool(boxes), checks + 1
+                        if hits is not None and boxes:
+                            hits[k] = 1
+                    else:
+                        boxes = []
                     rects = patches(prev, boxes)
                     for fr in buf:
                         if rects:
@@ -333,9 +414,14 @@ def encode(ff, src, sfps, frames, w, h, sess, tmp):
     raise SystemExit('ffmpeg could not make the share copy.')
 
 
-def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_lights=True, part=None):
+def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_lights=True, part=None,
+               signals_file=None, scan_all=False, excerpt=None):
     """part=(i, n, folder): make only piece i of n into folder (for machines
-    that can't run long at a stretch); part=(None, n, folder) joins them."""
+    that can't run long at a stretch); part=(None, n, folder) joins them.
+    Traffic lights are looked for only near the traffic signals on the map
+    (OpenStreetMap, or signals_file: [[lat, lon], ...]); scan_all looks
+    everywhere. excerpt=(from s, to s) of the ride video: a short preview
+    (…_share_preview.mp4, not a ride) to check the result."""
     src = Path(src).expanduser().resolve()
     meta = read_ride_meta(src)
     if not meta:
@@ -344,9 +430,20 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
         raise SystemExit(f'{src.name} is already a share copy.')
     route, start_ts, tz = read_route(base64.b64decode(meta['fit']))
     speed = steady_speed(route)
-    frames, segs = plan_frames(route, meta['segments'], speed, FPS)
+    frames, segs, dists = plan_frames(route, meta['segments'], speed, FPS)
     if not frames:
         raise SystemExit('The video covers none of the ride.')
+    look, which, passes = None, None, []
+    if hide_lights and not scan_all:
+        sig = ([tuple(x) for x in json.loads(Path(signals_file).read_text())] if signals_file
+               else fetch_signals(route, src.with_name(src.stem + '.signals.json')))
+        if sig is None:
+            say('Could not reach the map (OpenStreetMap): looking for traffic lights everywhere (slow).')
+        else:
+            passes = signal_passes(route, sig)
+            look, which = look_plan(dists, passes)
+            say(f'Map: {len(passes)} traffic signal{"s" if len(passes) != 1 else ""} along the ride; '
+                'looking for lights only around those.')
     info = mp4_info(src)
     sw, sh = info.get('width') or width, info.get('height') or width // 2
     w = min(width, sw) & ~1
@@ -355,6 +452,33 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
     tmp = out.with_name(out.stem + '.partial.mp4')
     every = FPS // DETECT_HZ
     note = ''
+
+    def report(hits, which_, frames_):
+        for j, (dp, _) in enumerate(passes):
+            ks = [k for k in range(len(frames_)) if which_ and which_[k] == j and (k % every == 0)]
+            if ks:
+                found = sum(1 for k in ks if hits[k])
+                say(f'    signal {j + 1} at {mmss(frames_[ks[len(ks) // 2]])} in the ride video: '
+                    + (f'lights covered ({found} of {len(ks)} checks)' if found else 'NO LIGHT FOUND, please check'))
+
+    if excerpt:
+        a, b = excerpt
+        ks = [k for k, t in enumerate(frames) if a <= t <= b]
+        if not ks:
+            raise SystemExit('The excerpt is outside the video.')
+        k0, k1 = ks[0] - ks[0] % every, ks[-1] + 1
+        fr = frames[k0:k1]
+        lk = look[k0:k1] if look else None
+        wh = which[k0:k1] if which else None
+        prev = src.with_name(src.stem + '_share_preview.mp4')
+        say(f'Preview {mmss(a)}-{mmss(b)}: {len(fr) / FPS:.0f} s of video ...')
+        hits = [0] * len(fr)
+        encode(ff, src, source_fps(ff, src), fr, w, h, load_detector() if hide_lights else None,
+               prev.with_name(prev.stem + '.partial.mp4'), lk, hits)
+        os.replace(prev.with_name(prev.stem + '.partial.mp4'), prev)
+        report(hits, wh, fr)
+        say(f'Done: {prev.name}')
+        return prev
     if part and part[0] is not None:                     # one piece
         i, n, pdir = part
         Path(pdir).mkdir(parents=True, exist_ok=True)
@@ -363,8 +487,10 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
         if not piece:
             return None
         dst = Path(pdir) / f'{i:03d}.mp4'
+        hits = [0] * len(piece)
         lights, checks = encode(ff, src, source_fps(ff, src), piece, w, h, load_detector() if hide_lights else None,
-                                dst.with_suffix('.partial.mp4'))
+                                dst.with_suffix('.partial.mp4'), look[i * per:(i + 1) * per] if look else None, hits)
+        report(hits, which[i * per:(i + 1) * per] if which else None, piece)
         os.replace(dst.with_suffix('.partial.mp4'), dst)
         say(f'Piece {i + 1} of {n} done ({len(piece) / FPS:.0f} s of video): traffic lights in {lights} of {checks} checks.')
         return dst
@@ -378,7 +504,10 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
     else:
         say(f'Making a share copy of {src.name}: {w} x {h}, steady {speed * 3.6:.0f} km/h, '
             f'{len(frames) / FPS / 60:.0f} min of video' + (', hiding traffic lights' if hide_lights else '') + ' ...')
-        lights, checks = encode(ff, src, source_fps(ff, src), frames, w, h, load_detector() if hide_lights else None, tmp)
+        hits = [0] * len(frames)
+        lights, checks = encode(ff, src, source_fps(ff, src), frames, w, h, load_detector() if hide_lights else None,
+                                tmp, look, hits)
+        report(hits, which, frames)
         if hide_lights:
             note = f'; traffic lights covered in {lights} of {checks} checks'
     new = {'app': 'ride-display', 'version': 1, 'fitName': 'route.fit',

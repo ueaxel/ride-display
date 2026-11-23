@@ -713,12 +713,19 @@ def main():
         import share_ride
         args = sys.argv[1:]
         width = int(args[args.index('--width') + 1]) if '--width' in args else 3840
-        files = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or args[i - 1] != '--width')]
+        files = [a for i, a in enumerate(args) if not a.startswith('--')
+                 and (i == 0 or args[i - 1] not in ('--width', '--excerpt', '--signals'))]
         if not files:
-            raise SystemExit('usage: make_ride_video.py --share RideVideo_....mp4 [--width 3840]')
+            raise SystemExit('usage: make_ride_video.py --share RideVideo_....mp4 [--width 3840] [--excerpt 16:40-18:10]'
+                             ' [--signals signals.json | --scan-all | --no-light-check]')
         ff = ffmpeg_bin()
         if not ff:
             raise SystemExit('Needs ffmpeg. Install it once with:  brew install ffmpeg')
+        def secs(x):
+            m, _, sec = x.rpartition(':')
+            return int(m or 0) * 60 + float(sec)
+        opt = lambda name: args[args.index(name) + 1] if name in args else None
+        excerpt = tuple(secs(x) for x in opt('--excerpt').split('-')) if opt('--excerpt') else None
         part = None
         if '--piece' in args:                            # --piece I/N DIR  (I = 'join' to join)
             a, b = args[args.index('--piece') + 1].split('/')
@@ -726,7 +733,8 @@ def main():
             files = [f for f in files if f not in (args[args.index('--piece') + 1], part[2])]
         for f in files:
             share_ride.make_share(f, ff, read_ride_meta, mp4_info, RIDE_UUID, width=width, part=part,
-                                  hide_lights='--no-light-check' not in args)
+                                  hide_lights='--no-light-check' not in args, signals_file=opt('--signals'),
+                                  scan_all='--scan-all' in args, excerpt=excerpt)
         return
     if '--phone' in sys.argv:
         files = [a for a in sys.argv[1:] if not a.startswith('--')]
