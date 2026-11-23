@@ -29,7 +29,6 @@ import os
 from pathlib import Path
 import struct
 import subprocess
-import sys
 import urllib.request
 
 import estimate_power
@@ -266,42 +265,24 @@ def source_fps(ff, src):
     return float(a) / float(b or 1)
 
 
-def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_lights=True):
-    src = Path(src).expanduser().resolve()
-    meta = read_ride_meta(src)
-    if not meta:
-        raise SystemExit(f'{src.name} is not a ride video made by this tool (no ride inside).')
-    if meta.get('shareCopy'):
-        raise SystemExit(f'{src.name} is already a share copy.')
-    sess = load_detector() if hide_lights else None
-    route, start_ts, tz = read_route(base64.b64decode(meta['fit']))
-    speed = steady_speed(route)
-    frames, segs = plan_frames(route, meta['segments'], speed, FPS)
-    if not frames:
-        raise SystemExit('The video covers none of the ride.')
-    info = mp4_info(src)
-    sw, sh = info.get('width') or width, info.get('height') or width // 2
-    w = min(width, sw) & ~1
-    h = (w // 2 if sw == 2 * sh else int(sh * w / sw)) & ~1
-    sfps = source_fps(ff, src)
-    out = src.with_name(src.stem.replace('_phone', '') + '_share.mp4')
-    tmp = out.with_name(out.stem + '.partial.mp4')
-    say(f'Making a share copy of {src.name}: {w} x {h}, steady {speed * 3.6:.0f} km/h, '
-        f'{len(frames) / FPS / 60:.0f} min of video' + (', hiding traffic lights' if sess else '') + ' ...')
+def encode(ff, src, sfps, frames, w, h, sess, tmp):
+    """Write the output frames (source seconds) to tmp, traffic lights covered.
+    Returns (lights seen, checks made)."""
     import numpy as np
-    dec = subprocess.Popen([ff, '-v', 'error', '-i', str(src), '-map', '0:v:0', '-vf', f'scale={w}:{h}',
-                            '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
+    ss = max(0.0, frames[0] - 1.0)
+    dec_args = [ff, '-v', 'error'] + (['-ss', f'{ss:.3f}'] if ss > 0 else []) + [
+        '-i', str(src), '-map', '0:v:0', '-vf', f'scale={w}:{h}', '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-']
     det = Detector(sess, w, h) if sess else None
-    fsize = w * h * 3 // 2
-    lights = 0
+    fsize, every = w * h * 3 // 2, FPS // DETECT_HZ
+    planes = lambda a: (a[:w * h].reshape(h, w), a[w * h:w * h * 5 // 4].reshape(h // 2, w // 2),
+                        a[w * h * 5 // 4:].reshape(h // 2, w // 2))
     for enc, args in encoders(ff):
-        dec_frame, cur, src_i = None, None, -1
-        ok = True
+        dec = subprocess.Popen(dec_args, stdout=subprocess.PIPE)
         enc_p = subprocess.Popen([ff, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', f'{w}x{h}',
                                   '-r', str(FPS), '-i', '-', '-c:v', enc, *args, '-pix_fmt', 'yuv420p',
                                   '-movflags', '+faststart', str(tmp)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-        every = FPS // DETECT_HZ
-        buf, prev_boxes, shown = [], [], -1
+        cur, src_i = None, int(round(ss * sfps)) - 1
+        buf, prev, lights, checks, shown, ok = [], [], 0, 0, -1, True
         try:
             for k, t in enumerate(frames):
                 want = int(round(t * sfps))
@@ -312,41 +293,86 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
                     cur, src_i = raw, src_i + 1
                 if cur is None:
                     raise SystemExit('Could not read the video.')
+                if not det:
+                    enc_p.stdin.write(cur)
+                    continue
                 buf.append(cur)
-                if det and (k % every == 0 or k == len(frames) - 1):
-                    a = np.frombuffer(cur, np.uint8)
-                    boxes = det.boxes(a[:w * h].reshape(h, w), a[w * h:w * h * 5 // 4].reshape(h // 2, w // 2),
-                                      a[w * h * 5 // 4:].reshape(h // 2, w // 2))
-                    lights += bool(boxes)
-                    rects = patches(prev_boxes, boxes)
+                if k % every == 0 or k == len(frames) - 1:
+                    boxes = det.boxes(*planes(np.frombuffer(cur, np.uint8)))
+                    lights, checks = lights + bool(boxes), checks + 1
+                    rects = patches(prev, boxes)
                     for fr in buf:
                         if rects:
                             a = np.frombuffer(fr, np.uint8).copy()
-                            cover(a[:w * h].reshape(h, w), a[w * h:w * h * 5 // 4].reshape(h // 2, w // 2),
-                                  a[w * h * 5 // 4:].reshape(h // 2, w // 2), rects, w, h)
+                            cover(*planes(a), rects, w, h)
                             fr = a.tobytes()
                         enc_p.stdin.write(fr)
-                    buf, prev_boxes = [], boxes
-                elif not det:
-                    enc_p.stdin.write(buf.pop())
+                    buf, prev = [], boxes
                 pct = int(100 * k / len(frames))
-                if pct >= shown + 5:
-                    shown = pct - pct % 5
+                if pct >= shown + 10:
+                    shown = pct - pct % 10
                     say(f'    {shown} %')
             for fr in buf:
                 enc_p.stdin.write(fr)
             enc_p.stdin.close()
         except BrokenPipeError:
             ok = False
+        dec.kill()
         err = enc_p.stderr.read().decode(errors='replace')
         if enc_p.wait() == 0 and ok:
-            break
+            return lights, checks
         say(f'    ({enc} did not work: {err.strip().splitlines()[-1] if err.strip() else "?"}; trying another way)')
-        dec.kill()
-        dec = subprocess.Popen(dec.args, stdout=subprocess.PIPE)
+    raise SystemExit('ffmpeg could not make the share copy.')
+
+
+def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_lights=True, part=None):
+    """part=(i, n, folder): make only piece i of n into folder (for machines
+    that can't run long at a stretch); part=(None, n, folder) joins them."""
+    src = Path(src).expanduser().resolve()
+    meta = read_ride_meta(src)
+    if not meta:
+        raise SystemExit(f'{src.name} is not a ride video made by this tool (no ride inside).')
+    if meta.get('shareCopy'):
+        raise SystemExit(f'{src.name} is already a share copy.')
+    route, start_ts, tz = read_route(base64.b64decode(meta['fit']))
+    speed = steady_speed(route)
+    frames, segs = plan_frames(route, meta['segments'], speed, FPS)
+    if not frames:
+        raise SystemExit('The video covers none of the ride.')
+    info = mp4_info(src)
+    sw, sh = info.get('width') or width, info.get('height') or width // 2
+    w = min(width, sw) & ~1
+    h = (w // 2 if sw == 2 * sh else int(sh * w / sw)) & ~1
+    out = src.with_name(src.stem.replace('_phone', '') + '_share.mp4')
+    tmp = out.with_name(out.stem + '.partial.mp4')
+    every = FPS // DETECT_HZ
+    note = ''
+    if part and part[0] is not None:                     # one piece
+        i, n, pdir = part
+        Path(pdir).mkdir(parents=True, exist_ok=True)
+        per = math.ceil(len(frames) / n / every) * every
+        piece = frames[i * per:(i + 1) * per]
+        if not piece:
+            return None
+        dst = Path(pdir) / f'{i:03d}.mp4'
+        lights, checks = encode(ff, src, source_fps(ff, src), piece, w, h, load_detector() if hide_lights else None,
+                                dst.with_suffix('.partial.mp4'))
+        os.replace(dst.with_suffix('.partial.mp4'), dst)
+        say(f'Piece {i + 1} of {n} done ({len(piece) / FPS:.0f} s of video): traffic lights in {lights} of {checks} checks.')
+        return dst
+    if part:                                             # join the pieces
+        _, n, pdir = part
+        lst = Path(pdir) / 'pieces.txt'
+        lst.write_text(''.join(f"file '{Path(pdir).resolve() / f'{j:03d}.mp4'}'\n" for j in range(n)
+                               if (Path(pdir) / f'{j:03d}.mp4').exists()))
+        subprocess.run([ff, '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(lst), '-c', 'copy',
+                        '-movflags', '+faststart', str(tmp)], check=True)
     else:
-        raise SystemExit('ffmpeg could not make the share copy.')
-    dec.kill()
+        say(f'Making a share copy of {src.name}: {w} x {h}, steady {speed * 3.6:.0f} km/h, '
+            f'{len(frames) / FPS / 60:.0f} min of video' + (', hiding traffic lights' if hide_lights else '') + ' ...')
+        lights, checks = encode(ff, src, source_fps(ff, src), frames, w, h, load_detector() if hide_lights else None, tmp)
+        if hide_lights:
+            note = f'; traffic lights covered in {lights} of {checks} checks'
     new = {'app': 'ride-display', 'version': 1, 'fitName': 'route.fit',
            'fit': base64.b64encode(route_fit(route, speed, start_ts, tz)).decode(),
            'segments': segs, 'made': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
@@ -364,7 +390,6 @@ def make_share(src, ff, read_ride_meta, mp4_info, ride_uuid, width=3840, hide_li
     with open(tmp, 'ab') as f:
         f.write(struct.pack('>I4s', 8 + len(payload), b'uuid') + payload)
     os.replace(tmp, out)
-    say(f'Done: {out.name} ({out.stat().st_size / 1e9:.2f} GB)' +
-        (f'; traffic lights covered in {lights} of {math.ceil(len(frames) / every)} checks' if det else '') +
-        '. Watch it once before sharing: lights the detector missed stay visible.')
+    say(f'Done: {out.name} ({out.stat().st_size / 1e9:.2f} GB){note}. '
+        'Watch it once before sharing: lights the detector missed stay visible.')
     return out
