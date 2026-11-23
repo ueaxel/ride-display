@@ -655,12 +655,15 @@ def read_ride_meta(path):
 
 
 PHONE_WIDTH, PHONE_BITRATE = 2560, '6M'
+STREAM_MAX_BYTES = 290e6          # the Cloudflare dashboard takes files up to 300 MB
 
 
-def make_phone(src):
+def make_phone(src, stream=False):
     """A smaller copy of a ride video for a phone or tablet (no streaming needed:
     copy it onto the device): 2560 x 1280, H.264 (plays on iPhone, Android,
-    any browser), about 2.7 GB per hour, same ride data inside."""
+    any browser), about 2.7 GB per hour, same ride data inside.
+    stream=True: the same, sized to stay under 300 MB (no sound) so it can be
+    uploaded in the Cloudflare dashboard and streamed: …_stream.mp4."""
     src = Path(src).expanduser().resolve()
     meta = read_ride_meta(src)
     if not meta:
@@ -669,18 +672,26 @@ def make_phone(src):
     if not ff:
         raise SystemExit('Needs ffmpeg. Install it once with:  brew install ffmpeg')
     info = mp4_info(src)
-    out = src.with_name(src.stem.replace('_phone', '') + '_phone.mp4')
+    kind = '_stream' if stream else '_phone'
+    out = src.with_name(src.stem.replace('_phone', '').replace('_stream', '') + kind + '.mp4')
     tmp = out.with_name(out.stem + '.partial.mp4')
     w = min(PHONE_WIDTH, info.get('width') or PHONE_WIDTH)
     h = w // 2 if (info.get('width') or 0) == 2 * (info.get('height') or 0) else -2
     encs = subprocess.run([ff, '-hide_banner', '-encoders'], capture_output=True, text=True).stdout
-    tries = ([('h264_videotoolbox', ['-b:v', PHONE_BITRATE, '-profile:v', 'high'])] if 'h264_videotoolbox' in encs else []) + \
-            [('libx264', ['-preset', 'veryfast', '-crf', '23', '-maxrate', '8M', '-bufsize', '16M', '-profile:v', 'high'])]
-    say(f'Making a phone-size copy of {src.name} ({info["duration"] / 60:.0f} min of video) ...')
+    if stream:                    # bitrate that keeps the whole file under the upload limit
+        kbps = int(min(8000, STREAM_MAX_BYTES * 8 / info['duration'] / 1000 * 0.92))
+        rate = ['-b:v', f'{kbps}k', '-maxrate', f'{kbps}k', '-bufsize', f'{2 * kbps}k']
+        tries = ([('h264_videotoolbox', rate + ['-profile:v', 'high'])] if 'h264_videotoolbox' in encs else []) + \
+                [('libx264', ['-preset', 'veryfast'] + rate + ['-profile:v', 'high'])]
+    else:
+        tries = ([('h264_videotoolbox', ['-b:v', PHONE_BITRATE, '-profile:v', 'high'])] if 'h264_videotoolbox' in encs else []) + \
+                [('libx264', ['-preset', 'veryfast', '-crf', '23', '-maxrate', '8M', '-bufsize', '16M', '-profile:v', 'high'])]
+    say(f'Making a {"streaming" if stream else "phone-size"} copy of {src.name} ({info["duration"] / 60:.0f} min of video) ...')
     for enc, args in tries:
-        cmd = [ff, '-v', 'error', '-y', '-i', str(src), '-map', '0:v:0', '-map', '0:a:0?',
+        sound = ['-an'] if stream else ['-map', '0:a:0?', '-c:a', 'aac', '-b:a', '96k']
+        cmd = [ff, '-v', 'error', '-y', '-i', str(src), '-map', '0:v:0', *sound,
                '-vf', f'scale={w}:{h}', '-c:v', enc, *args, '-pix_fmt', 'yuv420p',
-               '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', str(tmp)]
+               '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', str(tmp)]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         shown = -1
         for line in p.stdout:
@@ -698,23 +709,28 @@ def make_phone(src):
         say(f'    ({enc} did not work: {err.strip().splitlines()[-1] if err.strip() else "?"}; trying another way)')
     else:
         raise SystemExit('ffmpeg could not make the phone-size copy.')
-    meta = dict(meta, width=w, height=w // 2 if h == w // 2 else meta.get('height'), phoneCopyOf=src.name)
+    meta = dict(meta, width=w, height=w // 2 if h == w // 2 else meta.get('height'),
+                **({'streamCopyOf': src.name} if stream else {'phoneCopyOf': src.name}))
     payload = RIDE_UUID + json.dumps(meta).encode()
     with open(tmp, 'ab') as f:
         f.write(struct.pack('>I4s', 8 + len(payload), b'uuid') + payload)
     os.replace(tmp, out)
-    say(f'Done: {out.name} ({out.stat().st_size / 1e9:.2f} GB). Copy it to the phone (iPhone: AirDrop → save to Files), '
-        f'then in Ride Display (#video): Clips → pick it.')
+    if stream:
+        say(f'Done: {out.name} ({out.stat().st_size / 1e6:.0f} MB). Upload it to your Cloudflare R2 bucket and add it '
+            f'to index.json; its link: …/?ride={out.name}#video')
+    else:
+        say(f'Done: {out.name} ({out.stat().st_size / 1e9:.2f} GB). Copy it to the phone (iPhone: AirDrop → save to Files), '
+            f'then in Ride Display (#video): Clips → pick it.')
     return out
 
 
 def main():
-    if '--phone' in sys.argv:
+    if '--phone' in sys.argv or '--stream' in sys.argv:
         files = [a for a in sys.argv[1:] if not a.startswith('--')]
         if not files:
-            raise SystemExit('usage: make_ride_video.py --phone RideVideo_....mp4')
+            raise SystemExit('usage: make_ride_video.py --phone|--stream RideVideo_....mp4')
         for f in files:
-            make_phone(f)
+            make_phone(f, stream='--stream' in sys.argv)
         return
     argv, fit, rest = sys.argv[1:], None, []
     i = 0

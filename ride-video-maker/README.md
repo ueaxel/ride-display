@@ -10,6 +10,20 @@ Turns a bike ride into one video file for the [Ride Display](https://ueaxel.gith
 
 **Out:** `RideVideo_YYMMDD_HHMM.mp4` in the same folder, with the ride and the timing inside. In Ride Display: open the video screen (`#video`), **Clips** → pick that one file.
 
+## The app (easiest)
+
+Double-click **`Ride Video Maker.command`** (or `python3 ride_video_app.py`). A page opens in your browser
+(it runs on this computer only):
+
+1. **The ride folder:** *Choose…* the folder with the watch's .fit and the GoPro files.
+2. **What to make:** *Full size* (riding on this Mac / the tablet), *Streaming* (under 300 MB, to upload to
+   Cloudflare and share as a link), *Phone* (to copy onto a phone). If the folder already has a ride video, it can be
+   reused instead of putting it together again.
+3. **Make:** progress shows on the page; *Show in Finder* when done. For a streaming copy the page also shows the
+   `index.json` line and the link to send.
+
+Command line, same thing: `make_ride_video.py FOLDER`, then `--stream RideVideo_….mp4` or `--phone RideVideo_….mp4`.
+
 ## What it does
 
 1. **Timing:** reads the GPS time from the camera's own telemetry (exact, whatever the camera clock is set to), then fine-tunes it by laying the camera's GPS track over the ride's. Without a GPS fix it falls back on the camera clock (check with **Sync** in the app).
@@ -51,4 +65,5 @@ Converting 360° video takes roughly as long as the ride on a recent Mac (it use
 - `make_ride_video.py` — the tool
 - `estimate_power.py` — reads .fit files (and, run on its own, estimates power for rides recorded without a power meter: `python3 estimate_power.py RIDE.fit OUT.fit --rider-kg 75`)
 - `Make Ride Video.command` — double-click starter for the Mac
+- `ride_video_app.py` / `Ride Video Maker.command` — the app in your browser
 - `Make Phone Version.command` — double-click: phone-size copy of a ride video
