@@ -212,6 +212,13 @@
   dialog p { color:var(--muted); font-size:14px; line-height:1.4; }
   #refInfo { color:var(--text); }
   .err { color:var(--red); }
+  /* dark screen (keeps recording) and the raw-recording marker */
+  #dark { position:fixed; inset:0; background:#000; z-index:1000; display:none; touch-action:none; }
+  #dark.show { display:block; }
+  #darkHint { position:absolute; left:0; right:0; top:45%; text-align:center; color:#555; font-size:18px; opacity:0; transition:opacity .3s; }
+  #darkHint.show { opacity:1; }
+  #rawDot { position:fixed; right:8px; bottom:calc(64px + env(safe-area-inset-bottom)); z-index:20; color:var(--red); font-size:12px; font-weight:700; pointer-events:none; }
+  .gfoot button.darkbtn { flex:0 0 52px; }
   /* pulse oximeter: the device's own two-colour screen, large */
   button.oxview { padding:0 6px; font-size:11px; border-radius:6px; margin-left:4px; text-transform:none; letter-spacing:0; }
   .oxlink { cursor:pointer; }
@@ -303,6 +310,7 @@
   <div class="gfoot">
     <button id="gStart" class="primary">Start</button>
     <button id="gResync">Reset gap</button>
+    <button id="gDark" class="darkbtn" title="Dark screen: keeps recording, double-tap to wake">☾</button>
   </div>
 </main>
 
@@ -465,7 +473,8 @@
   <canvas id="oxScreen"></canvas>
   <div id="oxHex"></div>
   <p id="oxNote">Put your finger in the oximeter and tap <b>SpO2</b> at the top to connect. Keep your hand still and warm: on the bike, readings while pedaling hard or gripping the bars are often too low.</p>
-  <div class="row"><button id="oxHexBtn">Raw data</button><button id="oxClose" class="primary">Close</button></div>
+  <p id="oxRaw" class="muted"></p>
+  <div class="row"><button id="oxRec">● Record raw data</button><button id="oxRawSave">Save raw CSV</button><button id="oxHexBtn">Packets</button><button id="oxClose" class="primary">Close</button></div>
 </dialog>
 
 <dialog id="dlgMenu">
@@ -495,12 +504,20 @@
     <button id="mAllOx">Oximeter: show all devices</button>
     <button id="mOx">Oximeter screen</button>
   </div>
+  <div class="row" style="justify-content:flex-start">
+    <button id="mRaw">● Record raw data</button>
+    <button id="mRawSave">Save raw CSV</button>
+    <button id="mDark">Dark screen</button>
+  </div>
+  <p id="mRawInfo" class="muted"></p>
   <p>Tablet: connect the <b>HR strap</b> and the <b>trainer</b> (both over Bluetooth; the watch keeps the trainer on ANT+), press <b>Start</b> as you start the watch.<br>
   Phone: connect the <b>HR strap</b> and <b>GPS</b>, press <b>Start</b> at the spot where the original ride started.<br>
   <b>Reset gap</b> lines the ghost up with you again, like the Lap button on the watch; with gloves, use a button (see Settings → Button test).</p>
   <div class="row"><span class="muted" id="appVersion" style="margin-right:auto"></span><button id="menuClose" class="primary">Close</button></div>
 </dialog>
 
+<div id="dark"><div id="darkHint">double-tap to light up</div></div>
+<div id="rawDot" title="Raw recording running" style="display:none">● REC</div>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

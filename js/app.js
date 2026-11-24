@@ -15,6 +15,7 @@ import { saveRide, listRides, deleteRide } from './myrides.js';
 import { ironStops, findTurnBacks, cutTurnBack, workProfile } from './refedit.js';
 import { OutdoorPower } from './power.js';
 import { layOnRoute, memberAt, TEAM_COLORS } from './team.js';
+import { RawLog } from './rawlog.js';
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -24,7 +25,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '50 · 261124_1140 (pulse oximeter: SpO2 + oximeter screen)';
+export const APP_VERSION = '51 · 261124_1508 (raw recording at full resolution; dark screen)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -47,6 +48,7 @@ let streetsNote = '';
 const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0,
   spo2: null, oxPr: null, oxPi: null, tOx: 0, oxWave: [], oxBeat: 0, oxHex: [] };
 const links = {};
+const raw = new RawLog();                        // raw recording: every sensor value as it arrives
 let S, running, clock, indoor, matcher, offset, finished, steps, demo = null, demoGps = null;
 let quiet = false;
 // Trainer control from the tablet: 'off' (listen only), 'ghost' (ERG = original
@@ -686,6 +688,7 @@ function toggleGps() {
   btn.dataset.state = 'connecting';
   links.gps = startGps(fix => {
     live.fix = fix; live.tFix = Date.now();
+    raw.add({ lat: fix.lat, lon: fix.lon, gps_acc_m: fix.acc, alt_m: fix.alt });
     btn.dataset.state = fix.acc <= 25 ? 'connected' : 'connecting';
     btn.textContent = `GPS ±${Math.round(fix.acc)} m`;
   }, err => { btn.dataset.state = 'lost'; banner('GPS: ' + err); });
@@ -997,9 +1000,11 @@ const onHrData = d => {
   live.contact = d.contact;
   if (d.contact === false) { live.hr = null; return; }      // strap off: no reading, not a stale one
   live.hr = d.hr; live.tHr = Date.now();
+  raw.add({ hr: d.hr });
+  for (const rr of d.rr || []) raw.add({ rr_s: rr });
 };
 const onCadData = d => {
-  if (d.crank) { live.cadSensor = d.cadence; live.tCad = Date.now(); }
+  if (d.crank) { live.cadSensor = d.cadence; live.tCad = Date.now(); raw.add({ cadence: d.cadence }); }
   else if (d.wheel && !live.cadWarned) { live.cadWarned = true; banner('The cadence sensor is in speed mode (on the wheel hub). For cadence: take the battery out, put it back, and mount it on the crank (CYCPLUS: see its manual for switching modes).'); }
 };
 // pulse oximeter: readings ~1/s, waveform several times a second
@@ -1010,14 +1015,16 @@ function oxNow() {
 }
 const onOxData = d => {
   live.oxHex.push(d.hex); if (live.oxHex.length > 6) live.oxHex.shift();
-  if (d.kind === 'reading') { live.spo2 = d.spo2; live.oxPr = d.pr; live.oxPi = d.pi; live.tOx = Date.now(); }
+  if (d.kind === 'reading') { live.spo2 = d.spo2; live.oxPr = d.pr; live.oxPi = d.pi; live.tOx = Date.now(); raw.add({ spo2: d.spo2, ox_pulse: d.pr, pi: d.pi }); }
   else if (d.kind === 'wave') {
+    raw.wave(d.wave, d.beat);
     live.oxWave.push(...d.wave); if (live.oxWave.length > 300) live.oxWave.splice(0, live.oxWave.length - 300);
     if (d.beat) live.oxBeat = Date.now();
   }
 };
 let oxRaf = null, oxShowHex = false;
 function showOx() {
+  rawStatus();
   $('dlgOx').showModal();
   const draw = () => { if (!$('dlgOx').open) { oxRaf = null; return; } drawOx(); oxRaf = requestAnimationFrame(draw); };
   if (!oxRaf) oxRaf = requestAnimationFrame(draw);
@@ -1069,6 +1076,7 @@ const onTrainerData = d => {
   if (d.power != null) live.power = d.power;
   if (d.cadence != null) live.cadence = d.cadence;
   live.speed = d.speed ?? null; live.tPower = Date.now();
+  raw.add({ power: d.power, cadence: d.cadence, speed_kmh: d.speed });
   if (d.hr && Date.now() - live.tHr > 5000) { live.hr = d.hr; live.tHr = Date.now(); }
 };
 $('btnHr').onclick = () => bt('hr', connectHeartRate, $('btnHr'), onHrData);
@@ -1082,6 +1090,50 @@ $('tOxView').onclick = $('gOx').onclick = showOx;
 $('mOx').onclick = () => { $('dlgMenu').close(); showOx(); };
 $('oxClose').onclick = () => $('dlgOx').close();
 $('oxHexBtn').onclick = () => { oxShowHex = !oxShowHex; };
+
+// raw recording (oximeter screen and menu)
+function rawStatus() {
+  const on = raw.on, n = raw.count;
+  for (const b of [$('oxRec'), $('mRaw')]) { b.textContent = on ? '■ Stop raw recording' : '● Record raw data'; b.classList.toggle('stop', on); }
+  const txt = !raw.rec ? 'Raw recording: every sensor value as it arrives (oximeter waveform, each SpO2 reading, each heart beat), moving or not.'
+    : `Raw recording ${on ? 'running' : 'stopped'}: ${fmtTime(Math.round(raw.seconds))}, ${n.toLocaleString()} values` + (raw.lastWaveAt ? ` · waveform ${Math.round(raw.waveRate)} samples/s` : '') + '.';
+  $('oxRaw').textContent = txt; $('mRawInfo').textContent = txt;
+  for (const b of [$('oxRawSave'), $('mRawSave')]) b.disabled = !n;
+}
+function toggleRaw() {
+  if (raw.on) raw.stop();
+  else if (!raw.count || confirm('Start a new raw recording? The previous one is replaced (save it first if you need it).')) raw.start();
+  rawStatus();
+}
+function saveRaw() {
+  const csv = raw.csv();
+  if (!csv) return;
+  const d = new Date(raw.rec.start), p2 = v => String(v).padStart(2, '0');
+  const name = `RideDisplay_raw_${String(d.getFullYear()).slice(2)}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'application/octet-stream' })); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 600000);
+}
+$('oxRec').onclick = $('mRaw').onclick = toggleRaw;
+$('oxRawSave').onclick = $('mRawSave').onclick = saveRaw;
+setInterval(() => { if ($('dlgOx').open || $('dlgMenu').open) rawStatus(); if (raw.on) $('rawDot').style.display = ''; else $('rawDot').style.display = 'none'; }, 1000);
+
+// dark screen: black (the phone's OLED pixels are off), screen kept awake so
+// sensors, GPS and recording carry on; double-tap to light it up again
+function setDark(on) {
+  $('dark').classList.toggle('show', on);
+  if (on) { $('dlgMenu').open && $('dlgMenu').close(); }
+}
+$('gDark').onclick = () => setDark(true);
+$('mDark').onclick = () => setDark(true);
+let darkTap = 0;
+$('dark').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const now = Date.now();
+  if (now - darkTap < 450) { setDark(false); darkTap = 0; }
+  else { darkTap = now; $('darkHint').classList.add('show'); setTimeout(() => $('darkHint').classList.remove('show'), 1500); }
+});
 $('mRides').onclick = () => { $('dlgMenu').close(); showRides(); };
 $('ridesClose').onclick = () => $('dlgRides').close();
 $('mArea').onclick = () => { $('dlgMenu').close(); showArea(); };
@@ -1185,7 +1237,7 @@ const saveNow = () => { if (S && S.wall.length) saveRide(S, mode, rideState()); 
 window.addEventListener('pagehide', () => links.trainer?.control?.stop());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
 window.addEventListener('pagehide', saveNow);
-$('btnMenu').onclick = () => { $('appVersion').textContent = 'Version ' + APP_VERSION; $('dlgMenu').showModal(); };
+$('btnMenu').onclick = () => { $('appVersion').textContent = 'Version ' + APP_VERSION; rawStatus(); $('dlgMenu').showModal(); };
 $('menuClose').onclick = () => $('dlgMenu').close();
 $('mTrainer').onclick = () => { setMode('trainer'); $('dlgMenu').close(); };
 $('mGhost').onclick = () => { setMode('ghost'); $('dlgMenu').close(); };
@@ -1230,6 +1282,7 @@ video = initVideoScreen({
 newRide();
 if (refs.length && store.get('refIndex', 0) >= 0) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));
 restoreRide();
+raw.restore().then(rawStatus);
 document.body.classList.toggle('nobt', !bluetoothAvailable());
 if (!bluetoothAvailable() && !(window.isSecureContext && mode === 'video')) banner(window.isSecureContext ? 'This browser has no Web Bluetooth — use Chrome on Android, Mac or Windows.' : 'Open this page over https:// so Bluetooth and GPS can work.');
 keepScreenOn();

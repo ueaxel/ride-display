@@ -122,6 +122,14 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 
 The SpO2 tile (tablet) or the SpO2 number in the bottom line (phone) opens the **oximeter screen**: the device's own display, large (SpO2 in yellow, pulse in cyan, pulse bar, heartbeat, waveform). **Raw data** there shows the last packets in hex, to compare with the device. SpO2 and the oximeter's pulse are saved in the CSV (`spo2`, `ox_pulse`; not in the .fit, which has no SpO2 field Garmin Connect shows). Demo data fakes an oximeter too. Readings while pedaling hard or gripping the bars are often too low; for a real number, hold still for 30–60 s.
 
+## Raw recording (full resolution, moving or not)
+
+**● Record raw data** (☰ menu or the oximeter screen) records every sensor value the moment it arrives, independent of Start and of moving: the oximeter's pleth waveform (about 50 samples/s, 0–127, with beat markers), every SpO2/pulse/PI reading, every heart beat from the strap with its RR interval, trainer power/cadence/speed, cadence-sensor packets and GPS fixes. A red **● REC** shows while it runs. It is kept on the device (saved every 10 s, carries on after a reload); **Save raw CSV** downloads it, one row per moment (`t_s, clock, pleth, beat, spo2, ox_pulse, pi, hr, rr_s, power, cadence, speed_kmh, lat, lon, gps_acc_m, alt_m`; empty = no value at that moment). A new raw recording replaces the previous one. The normal ride recording stays one row per *moving* second.
+
+## Dark screen
+
+**☾** (phone, next to Reset gap) or ☰ → **Dark screen** turns the page black while it stays awake, so GPS, Bluetooth and recording carry on (a page in a browser stops getting GPS, and is soon paused, when the phone's screen is really turned off). On an OLED phone such as the Pixel 3a black pixels are off, so it uses little battery. Double-tap to light it up again; remote buttons keep working.
+
 ## GoPro MAX .360 straight into a ride video
 
 `Make Ride Video.command` now converts the GoPro MAX's own `.360` files itself (no GoPro Player export needed): put the watch `.fit` and all `.360` chapters of the ride in one folder and run it. Each chapter's two lens tracks become one 360° (equirectangular) video (ffmpeg; on a Mac with the hardware HEVC encoder, about as long as the ride), the chapters are joined, and the camera's gravity sensor is stored with the ride, so the video screen keeps the horizon level by itself (the Level sliders still fine-tune). Full-length GoPro Player exports in the folder are still used when present.
