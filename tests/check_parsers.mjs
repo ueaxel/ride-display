@@ -1,7 +1,7 @@
 // node Display/tests/check_parsers.mjs — Bluetooth packet parsers and the step finder.
 import { parseIndoorBikeData, parseHeartRate, makeCyclingPowerParser, DemoRider } from '../js/sensors.js';
 import { StepFinder } from '../js/hrmodel.js';
-import { powerCommand, simCommand } from '../js/sensors.js';
+import { powerCommand, simCommand, makeOximeterParser } from '../js/sensors.js';
 const dv = bytes => new DataView(new Uint8Array(bytes).buffer);
 let fails = 0;
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? 'ok  ' : 'FAIL', name, ok ? '' : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
@@ -20,6 +20,13 @@ check('Cycling power + cadence', cp(dv([0x20, 0x00, 0xFA, 0x00, 0x0B, 0x00, 0xAB
 check('FTMS set power 250 W', powerCommand(250), [0x05, 0xFA, 0x00]);
 check('FTMS grade +5 %', simCommand(0.05), [0x11, 0, 0, 0xF4, 0x01, 55, 20]);
 check('FTMS grade -2.5 %', simCommand(-0.025), [0x11, 0, 0, 0x06, 0xFF, 55, 20]);
+// pulse oximeter (PC-60F format): a reading split over two notifications, then a waveform packet
+const ox = makeOximeterParser();
+check('oximeter partial frame', ox([0x12, 0xAA, 0x55, 0x0F, 0x08, 0x01, 97]), []);
+const r = ox([72, 0x00, 25, 0x00, 0x00, 0x5C, 0xAA, 0x55, 0x0F, 0x07, 0x02, 10, 20, 0x9E, 40, 50, 0x33]);
+check('oximeter reading', r[0] && { spo2: r[0].spo2, pr: r[0].pr, pi: r[0].pi }, { spo2: 97, pr: 72, pi: 2.5 });
+check('oximeter waveform', r[1] && { wave: r[1].wave, beat: r[1].beat }, { wave: [10, 20, 30, 40, 50], beat: true });
+check('oximeter no finger', ox([0xAA, 0x55, 0x0F, 0x08, 0x01, 0, 0, 0, 0, 0, 0, 0x00]).map(m => [m.spo2, m.pr]), [[null, null]]);
 // step finder on the demo rider (6-s delay, tau 25 s up / 40 s down)
 const d = new DemoRider(), P = [], H = [];
 for (let i = 0; i < 1200; i++) { const s = d.next(); P.push(s.power); H.push(s.hr); }

@@ -115,6 +115,63 @@ export async function connectCadence(onData, onStatus, showAll = false) {
   return link;
 }
 
+// ------------------------------------------------------------ pulse oximeter
+
+// Fingertip oximeters made by Shenzhen Creative (PC-60F/PC-60FW, sold as
+// Contec, Wellue, Vibeat S6W "S5W-VU …"): Nordic UART service, notifications
+// on the TX characteristic. The byte stream is cut into frames
+//   AA 55 <token> <len> <type> <data…> <crc>     (len = type + data + crc)
+// type 0x01 (len 8): SpO2 %, pulse rate (16 bit), perfusion index ×10, status
+// type 0x02 (len 7): 5 pleth waveform samples (bit 7 = beat marker)
+// SpO2 or pulse 0 = no finger / still searching.
+export const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+export const NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+export function makeOximeterParser() {
+  let buf = [];
+  return bytes => {
+    buf.push(...bytes);
+    const out = [];
+    for (;;) {
+      let i = 0;
+      while (i + 1 < buf.length && !(buf[i] === 0xAA && buf[i + 1] === 0x55)) i++;
+      if (i) buf = buf.slice(i);                         // drop junk before a header
+      if (buf.length < 4) break;
+      const len = buf[3], total = 4 + len;
+      if (len < 2 || len > 60) { buf = buf.slice(2); continue; }
+      if (buf.length < total) break;
+      const f = buf.slice(0, total); buf = buf.slice(total);
+      const type = f[4], hex = f.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      if (type === 0x01 && len >= 7) {
+        const spo2 = f[5], pr = f[6] | (f[7] << 8), pi = f[8] / 10;
+        out.push({ kind: 'reading', spo2: spo2 > 0 && spo2 <= 100 ? spo2 : null, pr: pr > 0 && pr < 300 ? pr : null, pi: pi > 0 ? pi : null, hex });
+      } else if (type === 0x02) {
+        out.push({ kind: 'wave', wave: f.slice(5, 3 + len).map(b => b & 0x7F), beat: f.slice(5, 3 + len).some(b => b & 0x80), hex });
+      } else out.push({ kind: 'other', type, hex });
+    }
+    if (buf.length > 200) buf = [];
+    return out;
+  };
+}
+
+export async function connectOximeter(onData, onStatus, showAll = false) {
+  const link = new BleLink('Oximeter', onStatus);
+  await link.open(showAll ? { acceptAllDevices: true, optionalServices: [NUS_SERVICE] } : {
+    filters: [{ services: [NUS_SERVICE] }, ...['S5W', 'S6W', 'PC-60', 'PC60', 'OxySmart', 'Vibeat'].map(namePrefix => ({ namePrefix }))],
+    optionalServices: [NUS_SERVICE],
+  }, async server => {
+    const parse = makeOximeterParser();
+    const ch = await (await server.getPrimaryService(NUS_SERVICE)).getCharacteristic(NUS_TX);
+    ch.addEventListener('characteristicvaluechanged', e => {
+      const v = e.target.value;
+      for (const m of parse(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))) onData(m);
+    });
+    await ch.startNotifications();
+    link.protocol = 'PC-60F';
+  });
+  return link;
+}
+
 // ------------------------------------------------------------ trainer
 
 // FTMS Indoor Bike Data (0x2AD2). Returns speed km/h, cadence rpm, power W, hr.

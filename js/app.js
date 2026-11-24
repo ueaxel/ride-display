@@ -3,7 +3,7 @@
 //   #ghost   - phone on the handlebar, chasing the reference ride (GPS + HR strap)
 //   #video   - Mac (or tablet): full-screen ride video that follows you, panels on top
 import { Reference, IndoorRide, RIDER, profileFromFit, profileFromGpx } from './reference.js';
-import { bluetoothAvailable, connectHeartRate, connectTrainer, connectCadence, startGps, keepScreenOn, DemoRider } from './sensors.js';
+import { bluetoothAvailable, connectHeartRate, connectTrainer, connectCadence, connectOximeter, startGps, keepScreenOn, DemoRider } from './sensors.js';
 import { StepFinder } from './hrmodel.js';
 import { RouteMatcher, MovingClock } from './ghost.js';
 import * as D from './draw.js';
@@ -24,7 +24,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '49 · 261123_1010 (route grade by default; streamed rides can start looking up)';
+export const APP_VERSION = '50 · 261124_1140 (pulse oximeter: SpO2 + oximeter screen)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -44,7 +44,8 @@ let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
 let streets = null;                              // OSM streets along the reference route
 let streetsNote = '';
-const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0 };
+const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0,
+  spo2: null, oxPr: null, oxPi: null, tOx: 0, oxWave: [], oxBeat: 0, oxHex: [] };
 const links = {};
 let S, running, clock, indoor, matcher, offset, finished, steps, demo = null, demoGps = null;
 let quiet = false;
@@ -56,7 +57,7 @@ let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = nul
 function newRide() {
   if (S && S.wall.length) { saveRide(S, mode, { open: false }); stopTrainer(); }     // the ride you had is kept, closed
   S = { power: [], hr: [], cad: [], speed: [], dist: [], refDist: [], gapM: [], gapS: [], refPower: [], refHr: [],
-    lat: [], lon: [], alt: [], wall: [], pEst: [], work: [] };
+    lat: [], lon: [], alt: [], wall: [], pEst: [], work: [], spo2: [], oxPr: [] };
   trail = []; refTrail = []; stopEp = null; wasMoving = false;
   outPower = new OutdoorPower(rider);
   running = false; clock = new MovingClock(); indoor = new IndoorRide(rider);
@@ -137,6 +138,12 @@ function tick() {
   if (demo) {
     const s = demo.next();
     Object.assign(live, { power: s.power, cadence: s.cadence, hr: s.hr, tPower: now, tHr: now });
+    if (!links.ox) {                                  // fake oximeter too: reading + one second of pleth wave
+      const pr = s.hr, wave = [];
+      for (let i = 0; i < 50; i++) { const ph = ((now / 1000 + i / 50) * pr / 60) % 1; wave.push(Math.round(20 + 70 * Math.exp(-(((ph - 0.25) / 0.09) ** 2)) + 18 * Math.exp(-(((ph - 0.6) / 0.08) ** 2)))); }
+      onOxData({ kind: 'reading', spo2: Math.round(97 - Math.max(0, s.power - 180) / 40 + (Math.random() - 0.5)), pr, pi: 3.1, hex: 'demo' });
+      onOxData({ kind: 'wave', wave, beat: true, hex: 'demo' });
+    }
   }
   if (demoGps) { live.fix = demoGps.next(); live.tFix = now; }
   let replayD = null;
@@ -200,6 +207,9 @@ function tick() {
   const pNow = indoorMode() ? power : outPower.p3 ?? 0;
   S.pEst.push(Math.round(pNow)); S.work.push((last(S.work) ?? 0) + pNow);
   S.cad.push(indoorMode() || links.cad ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
+  const oxFresh = oxOn() && now - live.tOx < 5000;
+  for (const k of ['spo2', 'oxPr']) if (!S[k]) S[k] = S.wall.slice(0, -1).map(() => null);   // ride saved by an older version
+  S.spo2.push(oxFresh ? live.spo2 : null); S.oxPr.push(oxFresh ? live.oxPr : null);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null); S.alt.push(fix && fix.alt != null ? fix.alt : null);
   if (fix) { trail.push(area.xy(fix.lat, fix.lon)); if (matcher) refTrail.push(matcher.toXY(fix.lat, fix.lon)); }
   if (S.wall.length % 10 === 0) saveRide(S, mode, rideState());   // kept on the phone as you ride
@@ -371,6 +381,11 @@ function renderTrainer(t, you, ghost, gapM, gapS, hr) {
   $('tPower').textContent = running && p3 != null ? Math.round(p3) : fresh ? Math.round(live.power ?? 0) : '–';
   $('tHr').textContent = hr ?? (links.hr && live.contact === false ? 'no contact' : '–');
   $('tCad').textContent = fresh && live.cadence != null ? Math.round(live.cadence) : '–';
+  const ox = oxNow();
+  $('tOxTile').style.display = oxOn() ? '' : 'none';
+  $('tSpo2').textContent = ox.spo2 ?? '–';
+  $('tSpo2').className = 'v' + (ox.spo2 == null ? '' : ox.spo2 >= 94 ? '' : ox.spo2 >= 90 ? ' warn' : ' bad');
+  $('tSpo2Sub').textContent = ox.spo2 == null ? (oxOn() ? 'finger in?' : '%') : `% · pulse ${ox.pr ?? '–'}` + (ox.pi ? ` · PI ${ox.pi.toFixed(1)}` : '');
   $('tSpeed').textContent = S.speed.length ? (last(S.speed) * 3.6).toFixed(1) : '–';
   $('tTime').textContent = fmtTime(t);
   $('tState').textContent = !running ? (t ? 'stopped' : 'press Start') : finished ? 'reference distance reached' : clock.now - clock.lastMove > 3 ? 'paused' : 'riding';
@@ -455,6 +470,8 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
   $('gTime').textContent = fmtTime(t);
   const cadNow = Date.now() - live.tCad < 3000 ? live.cadSensor : null;
   $('gCad').textContent = links.cad ? `${cadNow ?? '–'} rpm` : '';
+  const oxG = oxNow();
+  $('gOx').textContent = oxOn() ? `SpO2 ${oxG.spo2 ?? '–'} %` : '';
   $('gDist').textContent = `${((last(S.dist) ?? 0) / 1000).toFixed(2)} km`;
   $('gLeft').textContent = ref ? `${(Math.max(0, ref.total - (you ?? 0)) / 1000).toFixed(2)} km to go` : '';
   $('gOff').style.display = matcher && matcher.offRoute ? 'block' : 'none';
@@ -700,12 +717,12 @@ class DemoGps {
 function saveCsv() {
   const n = S.dist.length;
   if (!n) { banner('Nothing recorded yet.'); return; }
-  const head = 'moving_s,clock,power_w,heart_rate,cadence,speed_kmh,distance_m,ghost_distance_m,gap_m,gap_s,ghost_power_w,ghost_hr,lat,lon';
+  const head = 'moving_s,clock,power_w,heart_rate,cadence,speed_kmh,distance_m,ghost_distance_m,gap_m,gap_s,ghost_power_w,ghost_hr,lat,lon,spo2,ox_pulse';
   const rows = [head];
   const f = (v, d = 0) => v == null ? '' : Number(v).toFixed(d);
   for (let i = 0; i < n; i++) {
     rows.push([i + 1, new Date(S.wall[i]).toISOString(), f(S.power[i]), f(S.hr[i]), f(S.cad[i]), f(S.speed[i] * 3.6, 1), f(S.dist[i], 1),
-      f(S.refDist[i], 1), f(S.gapM[i], 1), f(S.gapS[i], 1), f(S.refPower[i]), f(S.refHr[i]), f(S.lat[i], 6), f(S.lon[i], 6)].join(','));
+      f(S.refDist[i], 1), f(S.gapM[i], 1), f(S.gapS[i], 1), f(S.refPower[i]), f(S.refHr[i]), f(S.lat[i], 6), f(S.lon[i], 6), f(S.spo2?.[i]), f(S.oxPr?.[i])].join(','));
   }
   if (steps.steps.length) {
     rows.push('', 'step_at_s,direction,from_w,to_w,delay_s,tau_s,amplitude_bpm,r2,hrr60_bpm');
@@ -985,6 +1002,69 @@ const onCadData = d => {
   if (d.crank) { live.cadSensor = d.cadence; live.tCad = Date.now(); }
   else if (d.wheel && !live.cadWarned) { live.cadWarned = true; banner('The cadence sensor is in speed mode (on the wheel hub). For cadence: take the battery out, put it back, and mount it on the crank (CYCPLUS: see its manual for switching modes).'); }
 };
+// pulse oximeter: readings ~1/s, waveform several times a second
+const oxOn = () => !!(links.ox || demo);
+function oxNow() {
+  const fresh = oxOn() && Date.now() - live.tOx < 5000;
+  return { spo2: fresh ? live.spo2 : null, pr: fresh ? live.oxPr : null, pi: fresh ? live.oxPi : null };
+}
+const onOxData = d => {
+  live.oxHex.push(d.hex); if (live.oxHex.length > 6) live.oxHex.shift();
+  if (d.kind === 'reading') { live.spo2 = d.spo2; live.oxPr = d.pr; live.oxPi = d.pi; live.tOx = Date.now(); }
+  else if (d.kind === 'wave') {
+    live.oxWave.push(...d.wave); if (live.oxWave.length > 300) live.oxWave.splice(0, live.oxWave.length - 300);
+    if (d.beat) live.oxBeat = Date.now();
+  }
+};
+let oxRaf = null, oxShowHex = false;
+function showOx() {
+  $('dlgOx').showModal();
+  const draw = () => { if (!$('dlgOx').open) { oxRaf = null; return; } drawOx(); oxRaf = requestAnimationFrame(draw); };
+  if (!oxRaf) oxRaf = requestAnimationFrame(draw);
+}
+// looks like the device: SpO2 in yellow, pulse in cyan, pulse bar, pleth wave
+function drawOx() {
+  const c = $('oxScreen'), dpr = window.devicePixelRatio || 1;
+  const W = c.clientWidth, H = c.clientHeight;
+  if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const ox = oxNow(), Y = '#FFD200', C = '#19C8FF';
+  const big = Math.min(H * 0.38, W * 0.16);
+  const col = (x, label, v, color) => {               // small label on top, big number below it
+    g.fillStyle = color; g.textBaseline = 'alphabetic';
+    g.font = `600 ${Math.round(big * 0.2)}px system-ui, sans-serif`; g.textAlign = 'left';
+    g.fillText(label, x, big * 0.28);
+    g.font = `700 ${Math.round(big)}px system-ui, sans-serif`; g.fontVariantNumeric = 'tabular-nums';
+    g.fillText(v ?? '--', x, big * 1.2);
+  };
+  col(W * 0.04, '%SpO₂', ox.spo2, Y);
+  col(W * 0.44, 'PR bpm', ox.pr, C);
+  // pulse bar (height follows the waveform) and a heart that flashes on each beat
+  const wv = live.oxWave, cur = wv.length ? wv[wv.length - 1] : 0;
+  const bx = W * 0.88, bw = W * 0.05, bh = big * 1.1, by = big * 0.1, n = 10;
+  const lit = Math.round(Math.min(1, cur / 100) * n);
+  for (let i = 0; i < n; i++) { g.fillStyle = i < lit ? C : '#0A2A36'; g.fillRect(bx, by + bh - (i + 1) * bh / n + 2, bw, bh / n - 4); }
+  g.fillStyle = Date.now() - live.oxBeat < 250 ? '#FF4D4D' : '#3A1010';
+  g.font = `${Math.round(big * 0.3)}px system-ui`; g.textAlign = 'center'; g.fillText('♥', bx + bw / 2, by + bh + big * 0.35);
+  // PI
+  g.fillStyle = Y; g.font = `600 ${Math.round(big * 0.22)}px system-ui, sans-serif`; g.textAlign = 'left';
+  g.fillText(`PI ${ox.pi != null ? ox.pi.toFixed(1) + ' %' : '--'}`, W * 0.04, big * 1.6);
+  if (!oxOn()) { g.fillStyle = '#888'; g.textAlign = 'right'; g.fillText('not connected', W * 0.8, big * 1.6); }
+  else if (Date.now() - live.tOx > 5000) { g.fillStyle = '#888'; g.textAlign = 'right'; g.fillText('no reading – finger in?', W * 0.8, big * 1.6); }
+  // pleth waveform along the bottom
+  const top = big * 1.75, h = H - top - 8;
+  if (wv.length > 1 && h > 20) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of wv) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    const span = Math.max(10, hi - lo);
+    g.strokeStyle = C; g.lineWidth = 2; g.beginPath();
+    wv.forEach((v, i) => { const x = W * i / 299, y = top + h - (v - lo) / span * h; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  }
+  $('oxHex').textContent = oxShowHex ? live.oxHex.join('\n') : '';
+  $('oxNote').style.display = oxOn() && Date.now() - live.tOx < 5000 ? 'none' : '';
+}
 const onTrainerData = d => {
   if (d.power != null) live.power = d.power;
   if (d.cadence != null) live.cadence = d.cadence;
@@ -996,6 +1076,12 @@ $('btnTrainer').onclick = () => bt('trainer', connectTrainer, $('btnTrainer'), o
 $('btnGps').onclick = toggleGps;
 $('btnCad').onclick = () => bt('cad', connectCadence, $('btnCad'), onCadData);
 $('mAllCad').onclick = () => { $('dlgMenu').close(); if (links.cad) { links.cad.close(); links.cad = null; } bt('cad', connectCadence, $('btnCad'), onCadData, true); };
+$('btnOx').onclick = () => bt('ox', connectOximeter, $('btnOx'), onOxData);
+$('mAllOx').onclick = () => { $('dlgMenu').close(); if (links.ox) { links.ox.close(); links.ox = null; } bt('ox', connectOximeter, $('btnOx'), onOxData, true); };
+$('tOxView').onclick = $('gOx').onclick = showOx;
+$('mOx').onclick = () => { $('dlgMenu').close(); showOx(); };
+$('oxClose').onclick = () => $('dlgOx').close();
+$('oxHexBtn').onclick = () => { oxShowHex = !oxShowHex; };
 $('mRides').onclick = () => { $('dlgMenu').close(); showRides(); };
 $('ridesClose').onclick = () => $('dlgRides').close();
 $('mArea').onclick = () => { $('dlgMenu').close(); showArea(); };
@@ -1128,7 +1214,7 @@ window.addEventListener('hashchange', () => { if (MODES.includes(location.hash.s
 // ------------------------------------------------------------------ start
 
 $('ctlMode').value = ctlMode;
-for (const id of ['btnHr', 'btnTrainer', 'btnCad']) $(id).dataset.label = $(id).textContent;
+for (const id of ['btnHr', 'btnTrainer', 'btnCad', 'btnOx']) $(id).dataset.label = $(id).textContent;
 document.body.dataset.mode = mode;
 history.replaceState(null, '', '#' + mode);
 video = initVideoScreen({

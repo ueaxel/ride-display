@@ -116,6 +116,12 @@ node Display/tests/check_ridevideo.mjs RideVideo_….mp4   # a file from make_ri
 
 **Cadence** (phone: **Cad**) connects a Bluetooth cadence sensor (Cycling Speed and Cadence, e.g. CYCPLUS). Its cadence is shown on the phone, saved in the ride and the .fit, and on the tablet it takes the place of the trainer's cadence. Dual ANT+/Bluetooth sensors work with the watch and the phone at the same time: pair the watch over **ANT+**, the phone uses Bluetooth.
 
+## Pulse oximeter (SpO2)
+
+**SpO2** (phone: **O2**) connects a Bluetooth fingertip pulse oximeter of the PC-60F family (made by Shenzhen Creative and sold as Contec, Wellue, Vibeat S6W and others; it shows up as e.g. `S5W-VU 5094`). It uses the Nordic UART service; the app reads SpO2, pulse rate and perfusion index (about once a second) and the pleth waveform. Put your finger in first: the oximeter switches its Bluetooth off a few seconds after the finger comes out, and the app reconnects when it comes back on.
+
+The SpO2 tile (tablet) or the SpO2 number in the bottom line (phone) opens the **oximeter screen**: the device's own display, large (SpO2 in yellow, pulse in cyan, pulse bar, heartbeat, waveform). **Raw data** there shows the last packets in hex, to compare with the device. SpO2 and the oximeter's pulse are saved in the CSV (`spo2`, `ox_pulse`; not in the .fit, which has no SpO2 field Garmin Connect shows). Demo data fakes an oximeter too. Readings while pedaling hard or gripping the bars are often too low; for a real number, hold still for 30–60 s.
+
 ## GoPro MAX .360 straight into a ride video
 
 `Make Ride Video.command` now converts the GoPro MAX's own `.360` files itself (no GoPro Player export needed): put the watch `.fit` and all `.360` chapters of the ride in one folder and run it. Each chapter's two lens tracks become one 360° (equirectangular) video (ffmpeg; on a Mac with the hardware HEVC encoder, about as long as the ride), the chapters are joined, and the camera's gravity sensor is stored with the ride, so the video screen keeps the horizon level by itself (the Level sliders still fine-tune). Full-length GoPro Player exports in the folder are still used when present.
