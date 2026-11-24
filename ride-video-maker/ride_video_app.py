@@ -88,9 +88,12 @@ def work(folder, fit, outputs, reuse, quality='small', upload=False, title=None)
             job['outputs'].append({'kind': 'full', 'path': str(full), 'mb': round(full.stat().st_size / 1e6)})
         for kind in ('stream', 'phone'):
             if kind in outputs:
-                job['log'].append(f'Making the {"streaming" if kind == "stream" else "phone"} copy …')
-                run_tool([f'--{kind}'] + (['--good'] if kind == 'stream' and quality == 'good' else []) + [str(full)])
                 out = full.with_name(full.stem + f'_{kind}.mp4')
+                if out.exists() and out.stat().st_mtime > full.stat().st_mtime:   # e.g. only the upload failed last time
+                    job['log'].append(f'{out.name} is already made: using it (delete it to make it again).')
+                else:
+                    job['log'].append(f'Making the {"streaming" if kind == "stream" else "phone"} copy …')
+                    run_tool([f'--{kind}'] + (['--good'] if kind == 'stream' and quality == 'good' else []) + [str(full)])
                 job['outputs'].append({'kind': kind, 'path': str(out), 'mb': round(out.stat().st_size / 1e6)})
                 if kind == 'stream' and upload:
                     cfg = r2_upload.load_config()
