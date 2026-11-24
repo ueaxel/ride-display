@@ -18,6 +18,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import webbrowser
 
+import r2_upload
+
 HERE = Path(__file__).resolve().parent
 TOOL = HERE / 'make_ride_video.py'
 PORT = 8765
@@ -63,7 +65,7 @@ def run_tool(args):
         raise RuntimeError(job['log'][-1] if job['log'] else 'the tool stopped')
 
 
-def work(folder, fit, outputs, reuse):
+def work(folder, fit, outputs, reuse, quality='small', upload=False, title=None):
     job.update(running=True, log=[], outputs=[], error=None)
     try:
         folder = Path(folder)
@@ -87,14 +89,32 @@ def work(folder, fit, outputs, reuse):
         for kind in ('stream', 'phone'):
             if kind in outputs:
                 job['log'].append(f'Making the {"streaming" if kind == "stream" else "phone"} copy …')
-                run_tool([f'--{kind}', str(full)])
+                run_tool([f'--{kind}'] + (['--good'] if kind == 'stream' and quality == 'good' else []) + [str(full)])
                 out = full.with_name(full.stem + f'_{kind}.mp4')
                 job['outputs'].append({'kind': kind, 'path': str(out), 'mb': round(out.stat().st_size / 1e6)})
+                if kind == 'stream' and upload:
+                    cfg = r2_upload.load_config()
+                    r2 = r2_upload.R2(cfg.get('account'), cfg.get('keyId'), cfg.get('secret'), cfg.get('bucket'))
+                    job['log'].append(f'Uploading {out.name} to Cloudflare (bucket {cfg.get("bucket")}) …')
+                    r2.upload(out, say=job['log'].append)
+                    entry = {'file': out.name, 'title': title or folder.name, 'forward': 180, 'lookUp': 25}
+                    r2.add_ride(entry)
+                    site = (cfg.get('site') or '').rstrip('/')
+                    link = f'{site}/?ride={out.name}#video' if site else f'…/?ride={out.name}#video'
+                    job['outputs'][-1]['link'] = link
+                    job['log'].append(f'Uploaded and added to the rides list. Link: {link}')
         job['log'].append('All done.')
     except Exception as e:        # shown on the page
         job['error'] = str(e)
     finally:
         job['running'] = False
+
+
+def settings_view():
+    """Cloudflare settings for the page: never the secret itself."""
+    c = r2_upload.load_config()
+    return {'account': c.get('account', ''), 'keyId': c.get('keyId', ''), 'bucket': c.get('bucket', ''),
+            'site': c.get('site', ''), 'secretSet': bool(c.get('secret'))}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -115,6 +135,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, PAGE.encode(), 'text/html; charset=utf-8')
         if self.path == '/status':
             return self.send(200, job)
+        if self.path == '/settings':
+            return self.send(200, settings_view())
         self.send(404, {'error': 'not found'})
 
     def do_POST(self):
@@ -126,13 +148,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {'path': pick(q.get('kind', 'folder'))})
             if self.path == '/scan':
                 return self.send(200, scan(q['folder']))
+            if self.path == '/settings':
+                cfg = r2_upload.load_config()
+                for k in ('account', 'keyId', 'secret', 'bucket', 'site'):
+                    if q.get(k):
+                        cfg[k] = q[k].strip()
+                r2_upload.save_config(cfg)
+                return self.send(200, settings_view())
+            if self.path == '/test-upload':
+                cfg = r2_upload.load_config()
+                r2 = r2_upload.R2(cfg.get('account'), cfg.get('keyId'), cfg.get('secret'), cfg.get('bucket'))
+                st, _, data = r2.request('GET', 'index.json')
+                n = len(json.loads(data).get('rides', [])) if st == 200 else 0
+                return self.send(200, {'ok': True, 'rides': n})
             if self.path == '/run':
                 if job['running']:
                     return self.send(409, {'error': 'already working'})
                 outs = [o for o in q.get('outputs', []) if o in ('full', 'stream', 'phone')]
                 if not outs:
                     return self.send(400, {'error': 'choose at least one'})
-                threading.Thread(target=work, args=(q['folder'], q.get('fit'), outs, q.get('reuse')), daemon=True).start()
+                threading.Thread(target=work, args=(q['folder'], q.get('fit'), outs, q.get('reuse'),
+                                                    q.get('quality', 'small'), bool(q.get('upload')), q.get('title')),
+                                 daemon=True).start()
                 return self.send(200, {'ok': True})
             if self.path == '/reveal' and sys.platform == 'darwin':
                 subprocess.run(['open', '-R', q['path']])
@@ -175,7 +212,13 @@ code { background: #0b1014; padding: 1px 5px; border-radius: 5px; font-size: 12.
 
 <section><h2><span>2</span>What to make</h2>
   <label class="opt"><input type="checkbox" id="oFull" checked><div><b>Full size</b><span class="muted">Best quality, for riding on this Mac or the tablet. Several GB.</span></div></label>
-  <label class="opt"><input type="checkbox" id="oStream"><div><b>Streaming</b><span class="muted">Under 300 MB, to upload to Cloudflare and share as a link.</span></div></label>
+  <label class="opt"><input type="checkbox" id="oStream"><div><b>Streaming</b><span class="muted">For Cloudflare, to share as a link.</span>
+    <div id="streamOpts" style="display:none; margin-top:6px">
+      <label><input type="radio" name="q" value="good" checked> Good, about 1.8 GB per hour (needs the upload below)</label><br>
+      <label><input type="radio" name="q" value="small"> Small, under 300 MB (fits the Cloudflare dashboard upload)</label><br>
+      <label><input type="checkbox" id="oUpload" checked> Upload to Cloudflare and add it to the rides list</label>
+      <div class="row" style="margin-top:6px">Title: <input type="text" id="title" placeholder="e.g. Thornton loop"></div>
+    </div></div></label>
   <label class="opt"><input type="checkbox" id="oPhone"><div><b>Phone</b><span class="muted">About 2.7 GB per hour, to copy onto a phone.</span></div></label>
   <div id="reuseBox" class="muted" style="display:none; margin-top:8px"></div>
 </section>
@@ -184,6 +227,16 @@ code { background: #0b1014; padding: 1px 5px; border-radius: 5px; font-size: 12.
   <div class="row"><button id="go" class="primary" disabled>Make</button><span id="state" class="muted"></span></div>
   <pre id="log" style="display:none"></pre>
   <div id="outs"></div>
+</section>
+
+<section><h2>Cloudflare (for uploading)</h2>
+  <p class="muted" style="margin-top:0">Once: R2 → <b>Manage API tokens</b> → <b>Create API token</b> → permission <b>Object Read &amp; Write</b>, your bucket → Create. Copy the values here. They stay on this computer (in your home folder, readable by you only).</p>
+  <div class="row"><input id="cAccount" type="text" placeholder="Account ID (R2 overview page, right side)"></div>
+  <div class="row" style="margin-top:6px"><input id="cKey" type="text" placeholder="Access Key ID"></div>
+  <div class="row" style="margin-top:6px"><input id="cSecret" type="password" placeholder="Secret Access Key"></div>
+  <div class="row" style="margin-top:6px"><input id="cBucket" type="text" placeholder="Bucket name, e.g. weldontest-unedited"></div>
+  <div class="row" style="margin-top:6px"><input id="cSite" type="text" placeholder="Your site, e.g. https://rides.yourname.workers.dev"></div>
+  <div class="row" style="margin-top:8px"><button id="cSave">Save and test</button><span id="cState" class="muted"></span></div>
 </section>
 
 <section id="shareBox" style="display:none"><h2>Share the streaming copy</h2>
@@ -222,12 +275,28 @@ function update() {
   const ok = info && outputs().length && (($('reuse') && $('reuse').checked) || (info.fits.length && info.gopro.length));
   $('go').disabled = !ok || running;
 }
-['oFull', 'oStream', 'oPhone'].forEach(id => $(id).onchange = update);
+['oFull', 'oStream', 'oPhone'].forEach(id => $(id).onchange = () => { $('streamOpts').style.display = $('oStream').checked ? '' : 'none'; update(); });
+async function loadSettings() {
+  const c = await fetch('/settings').then(r => r.json());
+  $('cAccount').value = c.account; $('cKey').value = c.keyId; $('cBucket').value = c.bucket; $('cSite').value = c.site;
+  $('cSecret').placeholder = c.secretSet ? 'Secret Access Key (saved)' : 'Secret Access Key';
+  if (c.site && !$('site').value) $('site').value = c.site;
+}
+$('cSave').onclick = async () => {
+  $('cState').textContent = 'Testing…';
+  const r = await post('/settings', { account: $('cAccount').value, keyId: $('cKey').value, secret: $('cSecret').value, bucket: $('cBucket').value, site: $('cSite').value });
+  $('cSecret').value = ''; loadSettings();
+  const t = await post('/test-upload', {});
+  $('cState').innerHTML = t.error ? `<span class="err">${esc(t.error)}</span>` : `Connected: ${t.rides} ride${t.rides === 1 ? '' : 's'} in the bucket's list.`;
+};
+loadSettings();
 document.addEventListener('change', e => { if (e.target.id === 'reuse') update(); });
 let running = false;
 $('go').onclick = async () => {
   const reuse = $('reuse') && $('reuse').checked ? $('reuseFile').value : null;
-  const r = await post('/run', { folder: info.folder, fit: $('fit') ? $('fit').value : null, outputs: outputs(), reuse });
+  const quality = document.querySelector('input[name=q]:checked').value;
+  const r = await post('/run', { folder: info.folder, fit: $('fit') ? $('fit').value : null, outputs: outputs(), reuse,
+    quality, upload: $('oStream').checked && $('oUpload').checked, title: $('title').value.trim() || null });
   if (r.error) { $('state').innerHTML = `<span class="err">${esc(r.error)}</span>`; return; }
   running = true; update(); $('outs').innerHTML = ''; $('log').style.display = ''; $('shareBox').style.display = 'none'; poll();
 };
@@ -240,7 +309,7 @@ async function poll() {
   if (s.running) return setTimeout(poll, 1000);
   running = false; update(); look();
   const names = { full: 'Full size', stream: 'Streaming', phone: 'Phone' };
-  $('outs').innerHTML = s.outputs.map((o, i) => `<div class="out"><div><b>${names[o.kind]}</b> <span class="muted">${o.mb >= 1000 ? (o.mb / 1000).toFixed(1) + ' GB' : o.mb + ' MB'}</span><br><code>${esc(o.path.split('/').pop())}</code></div><button data-i="${i}">Show in Finder</button></div>`).join('');
+  $('outs').innerHTML = s.outputs.map((o, i) => `<div class="out"><div><b>${names[o.kind]}</b> <span class="muted">${o.mb >= 1000 ? (o.mb / 1000).toFixed(1) + ' GB' : o.mb + ' MB'}</span><br><code>${esc(o.path.split('/').pop())}</code>${o.link ? `<br>Link to send: <a href="${esc(o.link)}" target="_blank" style="color:var(--accent)">${esc(o.link)}</a>` : ''}</div><button data-i="${i}">Show in Finder</button></div>`).join('');
   $('outs').querySelectorAll('button').forEach(b => b.onclick = () => post('/reveal', { path: s.outputs[b.dataset.i].path }));
   stream = s.outputs.find(o => o.kind === 'stream'); share();
 }

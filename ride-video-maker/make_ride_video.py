@@ -656,14 +656,17 @@ def read_ride_meta(path):
 
 PHONE_WIDTH, PHONE_BITRATE = 2560, '6M'
 STREAM_MAX_BYTES = 290e6          # the Cloudflare dashboard takes files up to 300 MB
+STREAM_GOOD_KBPS = 4000           # 'good' streaming quality: about 1.8 GB per hour (uploaded by the app, no size limit)
 
 
-def make_phone(src, stream=False):
+def make_phone(src, stream=False, quality='small'):
     """A smaller copy of a ride video for a phone or tablet (no streaming needed:
     copy it onto the device): 2560 x 1280, H.264 (plays on iPhone, Android,
     any browser), about 2.7 GB per hour, same ride data inside.
     stream=True: the same, sized to stay under 300 MB (no sound) so it can be
-    uploaded in the Cloudflare dashboard and streamed: …_stream.mp4."""
+    uploaded in the Cloudflare dashboard and streamed: …_stream.mp4.
+    quality='good': streaming copy at about 1.8 GB per hour instead (sharper;
+    too big for the dashboard, the app uploads it)."""
     src = Path(src).expanduser().resolve()
     meta = read_ride_meta(src)
     if not meta:
@@ -679,7 +682,7 @@ def make_phone(src, stream=False):
     h = w // 2 if (info.get('width') or 0) == 2 * (info.get('height') or 0) else -2
     encs = subprocess.run([ff, '-hide_banner', '-encoders'], capture_output=True, text=True).stdout
     if stream:                    # bitrate that keeps the whole file under the upload limit
-        kbps = int(min(8000, STREAM_MAX_BYTES * 8 / info['duration'] / 1000 * 0.92))
+        kbps = STREAM_GOOD_KBPS if quality == 'good' else int(min(8000, STREAM_MAX_BYTES * 8 / info['duration'] / 1000 * 0.92))
         rate = ['-b:v', f'{kbps}k', '-maxrate', f'{kbps}k', '-bufsize', f'{2 * kbps}k']
         tries = ([('h264_videotoolbox', rate + ['-profile:v', 'high'])] if 'h264_videotoolbox' in encs else []) + \
                 [('libx264', ['-preset', 'veryfast'] + rate + ['-profile:v', 'high'])]
@@ -728,9 +731,9 @@ def main():
     if '--phone' in sys.argv or '--stream' in sys.argv:
         files = [a for a in sys.argv[1:] if not a.startswith('--')]
         if not files:
-            raise SystemExit('usage: make_ride_video.py --phone|--stream RideVideo_....mp4')
+            raise SystemExit('usage: make_ride_video.py --phone|--stream [--good] RideVideo_....mp4')
         for f in files:
-            make_phone(f, stream='--stream' in sys.argv)
+            make_phone(f, stream='--stream' in sys.argv, quality='good' if '--good' in sys.argv else 'small')
         return
     argv, fit, rest = sys.argv[1:], None, []
     i = 0

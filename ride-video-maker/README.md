@@ -22,6 +22,12 @@ Double-click **`Ride Video Maker.command`** (or `python3 ride_video_app.py`). A 
 3. **Make:** progress shows on the page; *Show in Finder* when done. For a streaming copy the page also shows the
    `index.json` line and the link to send.
 
+**Streaming quality:** *Good* (about 1.8 GB per hour) or *Small* (under 300 MB, fits the Cloudflare dashboard upload).
+**Upload to Cloudflare:** fill in the *Cloudflare* box once (R2 → Manage API tokens → Create API token, Object Read &
+Write for your bucket; the account ID is on the R2 overview page). The app then uploads the streaming copy (any size),
+adds it to the bucket's `index.json` (looking forward, view raised for a tilted camera) and shows the link to send.
+The keys stay in `~/.ride-video-maker.json`, readable by you only.
+
 Command line, same thing: `make_ride_video.py FOLDER`, then `--stream RideVideo_….mp4` or `--phone RideVideo_….mp4`.
 
 ## What it does
