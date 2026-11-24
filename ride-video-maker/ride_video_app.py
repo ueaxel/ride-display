@@ -140,7 +140,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {'error': 'not found'})
 
     def do_POST(self):
-        if self.headers.get('Origin') not in (None, f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}'):
+        if self.headers.get('Origin') not in (None, f'http://127.0.0.1:{self.server.server_port}',
+                                              f'http://localhost:{self.server.server_port}'):
             return self.send(403, {'error': 'only this page may use the app'})
         try:
             q = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
@@ -327,8 +328,15 @@ fetch('/status').then(r => r.json()).then(s => { if (s.running) { running = true
 
 
 def main():
-    srv = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
-    url = f'http://127.0.0.1:{PORT}/'
+    for port in range(PORT, PORT + 40):          # another program may already use the port
+        try:
+            srv = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+            break
+        except OSError:
+            continue
+    else:
+        raise SystemExit('No free port found for the app.')
+    url = f'http://127.0.0.1:{port}/'
     print(f'Ride Video Maker is open at {url}  (close this window to stop it)')
     if '--no-browser' not in sys.argv:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
