@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANT Live</title>
+<link rel="icon" href="../icon.svg">
+<style>
+  :root { --bg:#0B0F14; --panel:#121821; --line:#26313D; --muted:#9BA5B4; --text:#F2F5F8;
+          --teal:#2EC4B6; --green:#3DDC84; --yellow:#F4C152; --red:#F0605D; --accent:#F4C152; --hr:#F0605D; --pw:#5DA9F0; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, select, input { font:inherit; color:var(--text); }
+  select { background:#1C2530; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  button { background:#1C2530; border:1px solid var(--line); border-radius:10px; padding:8px 14px; cursor:pointer; white-space:nowrap; }
+  button:active { background:#2A3644; }
+  button.primary { background:var(--teal); color:#062520; border-color:var(--teal); font-weight:600; }
+  button.on { background:var(--red); border-color:var(--red); color:#fff; }
+  input[type=number] { width:80px; background:#1C2530; border:1px solid var(--line); border-radius:8px; padding:6px; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  header .title { font-weight:700; font-size:18px; margin-right:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--line); border-radius:999px; font-size:14px; color:var(--muted); }
+  .chip::before { content:''; width:9px; height:9px; border-radius:50%; background:#4A5563; }
+  .chip[data-state=connected]::before { background:var(--green); }
+  .chip[data-state=connecting]::before { background:var(--yellow); }
+  .chip[data-state=lost]::before { background:var(--red); }
+  .spacer { flex:1; }
+  .muted { color:var(--muted); }
+  .banner { background:#3A2A10; color:var(--accent); padding:10px 14px; font-size:14px; display:none; }
+  .banner.show { display:block; }
+  main { padding:14px; display:grid; align-items:start; grid-template-columns:repeat(auto-fill, minmax(420px, 1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .card.stale { opacity:.45; }
+  .card h3 { margin:0; font-size:15px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .card h3 .sub { color:var(--muted); font-weight:400; font-size:13px; }
+  .big { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px; }
+  .big div { background:#0E141B; border-radius:10px; padding:8px; }
+  .big .v { font-size:34px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
+  .big .u { color:var(--muted); font-size:13px; margin-left:3px; }
+  .label { color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums; }
+  td { padding:3px 4px; border-bottom:1px solid #1A222C; }
+  td:last-child { text-align:right; }
+  canvas { width:100%; height:90px; background:#0E141B; border-radius:10px; }
+  #empty { grid-column:1/-1; color:var(--muted); line-height:1.6; max-width:760px; }
+  #empty ol { padding-left:20px; }
+  #raw { font:12px ui-monospace, Menlo, monospace; white-space:pre; color:var(--muted); padding:0 14px 20px; max-height:40vh; overflow:auto; display:none; }
+  #raw.show { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title">ANT Live</span>
+  <button class="primary" id="btnUsb" title="Garmin ANT USB-m stick (WebUSB)">Connect ANT stick</button>
+  <button id="btnSerial" title="Older ANT USB2 stick or clones that appear as a serial port">Serial stick…</button>
+  <span class="chip" id="chip" data-state="off">no stick</span>
+  <select id="network" title="The stick listens to one ANT network at a time">
+    <option value="public">Garmin watches (AntLive)</option>
+    <option value="antplus">ANT+ sensors &amp; heart-rate broadcast</option>
+  </select>
+  <button id="btnDemo">Demo</button>
+  <span class="spacer"></span>
+  <label class="muted" title="Wheel circumference for ANT+ speed sensors">wheel <input type="number" id="wheel" value="2096" step="1"> mm</label>
+  <button id="btnRec">Record CSV</button>
+  <button id="btnRaw">Raw</button>
+  <span class="muted" id="version"></span>
+</header>
+<div class="banner" id="banner"></div>
+<main id="devices">
+  <div id="empty">
+    <p><b>Plug the ANT USB stick into the Mac and press <i>Connect ANT stick</i>.</b> Then, on the watch, either:</p>
+    <ol>
+      <li><b>All values:</b> start an activity with the <b>AntLive</b> data field on one of its data screens. The watch then sends heart rate, power, cadence, speed, distance, timer, altitude, ascent, position, heading, calories, averages and maxima, training effect, Pulse Ox, pressure, temperature, battery and steps.</li>
+      <li><b>Heart rate only, any Garmin watch, no app:</b> switch the list at the top to <i>ANT+ sensors &amp; heart-rate broadcast</i> and turn on <i>Broadcast Heart Rate</i> (on the FR265: hold UP › Health &amp; Wellness › Wrist Heart Rate › Broadcast Heart Rate; or, for every ride, START › activity › Menu › activity settings › Broadcast Heart Rate).</li>
+    </ol>
+    <p>The stick listens to one of two ANT networks at a time, chosen in the list at the top: <i>Garmin watches (AntLive)</i>, or <i>ANT+ sensors &amp; heart-rate broadcast</i> for straps, power meters, speed/cadence sensors, trainers and watches broadcasting heart rate. Every device heard shows up as its own card; several watches at once work too.</p>
+  </div>
+</main>
+<div id="raw"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
