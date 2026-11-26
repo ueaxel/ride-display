@@ -10,6 +10,16 @@ One web page with three screens, plus a tool for making your own ride videos. It
 
 The watch is not involved and the iPhone doesn't need to be connected. The watch keeps recording, and indoors it keeps controlling the R200 over **ANT+**. Each display listens to the same sensors over **Bluetooth**. If a sensor won't connect to the display, check that the watch is using it over ANT+ and not Bluetooth.
 
+## ANT Live (every watch value on the Mac)
+
+[`ant-live/`](ant-live/) shows, in real time, what Garmin watches and ANT+ sensors near the Mac send to an ANT USB stick: [open ANT Live](https://ueaxel.github.io/ride-display/ant-live/) in Chrome, plug in the stick, press **Connect ANT stick**.
+
+- **All values** (HR, power, cadence, speed, distance, timer, altitude, ascent, position, heading, calories, averages and maxima, training effect, Pulse Ox, pressure, temperature, battery, steps): put the **AntLive** data field (Garmin repo, `AntLive/`) on a data screen and start the activity. Works on the FR265 and other Connect IQ watches.
+- **Heart rate only, any Garmin watch, no app:** turn on *Broadcast Heart Rate*.
+- Power meters, speed/cadence sensors, trainers and HR straps in range show up too. **Record CSV** saves everything; **Raw** shows the bytes.
+
+Why it works this way: [ADR 0001](documentation/adr/0001-ant-live-reader.md). Test: `node tests/check_ant.mjs`.
+
 ## Ride Video Maker (make your own ride videos)
 
 The [`ride-video-maker`](ride-video-maker/) folder has the tool that turns a ride's .fit file and the GoPro files recorded during it into one video for the video screen: GPS time sync, GoPro MAX .360 → 360° conversion with horizon levelling, chapters joined. It runs on your own computer (Mac: double-click; anywhere: Python 3 + ffmpeg). See its [README](ride-video-maker/README.md).
