@@ -30,6 +30,25 @@ The keys stay in `~/.ride-video-maker.json`, readable by you only.
 
 Command line, same thing: `make_ride_video.py FOLDER`, then `--stream RideVideo_….mp4` or `--phone RideVideo_….mp4`.
 
+## Quick preview for choosing a stretch
+
+In the browser app, choose the ride folder and tick **Quick preview**. This clears the larger export choices. If you already have a `RideVideo_….mp4`, leave **Already made: use** selected. To use the camera files, clear it and keep the FIT, original chapters, and any `.LRV` files in the folder.
+
+The result is `RidePreview_YYMMDD_HHMM.mp4`, a silent, wide forward view at 854 × 480 and 8 fps. Open it in QuickTime, VLC, or another ordinary video player and write down the start/end positions of stretches to keep. Video is clipped to the FIT activity, joined in recording order, and camera-off gaps are skipped. A matching JSON file maps preview positions to the original recordings and FIT times. Keep it with the preview when requesting a selected stretch.
+
+For a camera mounted facing the rider, the default **Forward** is 180°. Change it to 0° for the opposite direction. **Look up** defaults to 25°, and **Field of view** to a wide 120°. These controls compensate for the mounting direction. The preview uses a fixed view and camera tilt.
+
+Compatible GoPro MAX `.LRV` camera previews are used automatically. With only `.360` files, the tool processes reduced-resolution cube faces directly. It can also read an existing ride video. Completed preview chapters are cached in `_ridepreview_work` for restarts. You can delete that folder after completion.
+
+Command line, from this folder, using either the ride folder or an existing RideVideo MP4 as the source
+
+```sh
+python3 make_ride_preview.py "/path/to/ride folder"
+python3 make_ride_preview.py "/path/to/RideVideo_example.mp4" --yaw 180 --pitch 25 --fov 120
+```
+
+Speed depends on the source and computer. On this Mac, one-minute samples took about one second using a camera `.LRV` and twelve seconds using full-size `.360`. Preview timestamps advance at normal playback speed. The preview is intended for selecting stretches, and high-quality exports should use the original recordings.
+
 ## What it does
 
 1. **Timing:** reads the GPS time from the camera's own telemetry (exact, whatever the camera clock is set to), then fine-tunes it by laying the camera's GPS track over the ride's. Without a GPS fix it falls back on the camera clock (check with **Sync** in the app).

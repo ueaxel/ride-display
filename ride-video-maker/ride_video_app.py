@@ -27,6 +27,7 @@ GOPRO = re.compile(r'^G[SXHL]\d{6}\.(360|MP4)$', re.I)
 COPY = re.compile(r'_(phone|stream|share)(_preview)?\.mp4$', re.I)
 
 job = {'running': False, 'log': [], 'outputs': [], 'error': None}
+job_lock = threading.Lock()
 
 
 def scan(folder):
@@ -56,8 +57,12 @@ def pick(kind):
 
 
 def run_tool(args):
+    run_process([sys.executable, '-u', str(TOOL), *args])
+
+
+def run_process(command):
     say = job['log'].append
-    p = subprocess.Popen([sys.executable, '-u', str(TOOL), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, cwd=str(HERE))
     for line in p.stdout:
         say(line.rstrip())
@@ -65,10 +70,25 @@ def run_tool(args):
         raise RuntimeError(job['log'][-1] if job['log'] else 'the tool stopped')
 
 
-def work(folder, fit, outputs, reuse, quality='small', upload=False, title=None):
+def work(folder, fit, outputs, reuse, quality='small', upload=False, title=None,
+         yaw=180, pitch=25, fov=120):
     job.update(running=True, log=[], outputs=[], error=None)
     try:
         folder = Path(folder)
+        if 'preview' in outputs:
+            from make_ride_preview import preview_sources
+            source = folder / reuse if reuse else folder
+            preview, _, _ = preview_sources(source, fit)
+            run_tool_preview = [sys.executable, '-u', str(HERE / 'make_ride_preview.py'), str(source),
+                                '--yaw', str(yaw), '--pitch', str(pitch), '--fov', str(fov)]
+            if fit:
+                run_tool_preview += ['--fit', fit]
+            run_process(run_tool_preview)
+            job['outputs'].append({'kind': 'preview', 'path': str(preview),
+                                   'mb': round(preview.stat().st_size / 1e6)})
+            if outputs == ['preview']:
+                job['log'].append('All done.')
+                return
         before = {p.name for p in folder.glob('RideVideo_*.mp4')}
         if reuse:
             full = folder / reuse
@@ -166,14 +186,21 @@ class Handler(BaseHTTPRequestHandler):
                 n = len(json.loads(data).get('rides', [])) if st == 200 else 0
                 return self.send(200, {'ok': True, 'rides': n})
             if self.path == '/run':
-                if job['running']:
-                    return self.send(409, {'error': 'already working'})
-                outs = [o for o in q.get('outputs', []) if o in ('full', 'stream', 'phone')]
+                outs = [o for o in q.get('outputs', []) if o in ('full', 'stream', 'phone', 'preview')]
                 if not outs:
                     return self.send(400, {'error': 'choose at least one'})
-                threading.Thread(target=work, args=(q['folder'], q.get('fit'), outs, q.get('reuse'),
-                                                    q.get('quality', 'small'), bool(q.get('upload')), q.get('title')),
-                                 daemon=True).start()
+                yaw, pitch, fov = float(q.get('yaw', 180)), float(q.get('pitch', 25)), float(q.get('fov', 120))
+                if not (-180 <= yaw <= 180 and -89 <= pitch <= 89 and 60 <= fov <= 150):
+                    return self.send(400, {'error': 'Check the preview view angles.'})
+                folder = q['folder']
+                with job_lock:
+                    if job['running']:
+                        return self.send(409, {'error': 'already working'})
+                    job.update(running=True, log=[], outputs=[], error=None)
+                    threading.Thread(target=work, args=(folder, q.get('fit'), outs, q.get('reuse'),
+                                                        q.get('quality', 'small'), bool(q.get('upload')), q.get('title'),
+                                                        yaw, pitch, fov),
+                                     daemon=True).start()
                 return self.send(200, {'ok': True})
             if self.path == '/reveal' and sys.platform == 'darwin':
                 subprocess.run(['open', '-R', q['path']])
@@ -215,6 +242,8 @@ code { background: #0b1014; padding: 1px 5px; border-radius: 5px; font-size: 12.
 </section>
 
 <section><h2><span>2</span>What to make</h2>
+  <label class="opt"><input type="checkbox" id="oPreview"><div><b>Quick preview</b><span class="muted">Wide forward view, 854 × 480, 8 fps. Watch in a normal video player and note start/end times. Includes video covered by the FIT; camera-off gaps are skipped.</span></div></label>
+  <div id="previewOpts" class="row" style="display:none; margin:8px 0"><label>Forward ° <input id="previewYaw" type="number" min="-180" max="180" value="180"></label><label>Look up ° <input id="previewPitch" type="number" min="-89" max="89" value="25"></label><label>Field of view ° <input id="previewFov" type="number" min="60" max="150" value="120"></label></div>
   <label class="opt"><input type="checkbox" id="oFull" checked><div><b>Full size</b><span class="muted">Best quality, for riding on this Mac or the tablet. Several GB.</span></div></label>
   <label class="opt"><input type="checkbox" id="oStream"><div><b>Streaming</b><span class="muted">For Cloudflare, to share as a link.</span>
     <div id="streamOpts" style="display:none; margin-top:6px">
@@ -264,22 +293,29 @@ async function look() {
   const r = await post('/scan', { folder });
   if (r.error) { $('found').innerHTML = `<span class="err">${esc(r.error)}</span>`; info = null; return update(); }
   info = r;
+  const full = r.rideVideos.filter(v => v.kind === 'full');
   const fits = r.fits.length > 1 ? `<div class="row" style="margin-top:6px">Ride: <select id="fit">${r.fits.map(f => `<option>${esc(f)}</option>`).join('')}</select></div>` : '';
   $('found').innerHTML = `<b>${r.fits.length}</b> ride file${r.fits.length === 1 ? '' : 's'} (.fit), <b>${r.gopro.length}</b> GoPro video${r.gopro.length === 1 ? '' : 's'}` +
     (r.gopro.length ? `<ul>${r.gopro.map(g => `<li>${esc(g.name)} <span class="muted">${g.gb} GB</span></li>`).join('')}</ul>` : '') + fits +
-    (!r.fits.length ? '<div class="err">No .fit in this folder: copy the ride from the watch or Garmin Connect here.</div>' : '') +
-    (!r.gopro.length ? '<div class="err">No GoPro originals (GS01….360, GX01….MP4) in this folder.</div>' : '');
-  const full = r.rideVideos.filter(v => v.kind === 'full');
+    (!r.fits.length && !full.length ? '<div class="err">No .fit in this folder: copy the ride from the watch or Garmin Connect here.</div>' : '') +
+    (!r.gopro.length && !full.length ? '<div class="err">No GoPro originals (GS01….360, GX01….MP4) in this folder.</div>' : '');
   $('reuseBox').style.display = full.length ? '' : 'none';
   $('reuseBox').innerHTML = full.length ? `<label><input type="checkbox" id="reuse" checked> Already made: use <select id="reuseFile">${full.map(v => `<option>${esc(v.name)}</option>`).join('')}</select> (skips putting it together again)</label>` : '';
   update();
 }
-function outputs() { return [['oFull', 'full'], ['oStream', 'stream'], ['oPhone', 'phone']].filter(([id]) => $(id).checked).map(([, k]) => k); }
+function outputs() { return [['oFull', 'full'], ['oStream', 'stream'], ['oPhone', 'phone'], ['oPreview', 'preview']].filter(([id]) => $(id).checked).map(([, k]) => k); }
 function update() {
   const ok = info && outputs().length && (($('reuse') && $('reuse').checked) || (info.fits.length && info.gopro.length));
   $('go').disabled = !ok || running;
 }
-['oFull', 'oStream', 'oPhone'].forEach(id => $(id).onchange = () => { $('streamOpts').style.display = $('oStream').checked ? '' : 'none'; update(); });
+['oFull', 'oStream', 'oPhone', 'oPreview'].forEach(id => $(id).onchange = () => {
+  if (id === 'oPreview' && $('oPreview').checked) {
+    ['oFull', 'oStream', 'oPhone'].forEach(other => { $(other).checked = false; });
+  }
+  $('previewOpts').style.display = $('oPreview').checked ? '' : 'none';
+  $('streamOpts').style.display = $('oStream').checked ? '' : 'none';
+  update();
+});
 async function loadSettings() {
   const c = await fetch('/settings').then(r => r.json());
   $('cAccount').value = c.account; $('cKey').value = c.keyId; $('cBucket').value = c.bucket; $('cSite').value = c.site;
@@ -300,7 +336,8 @@ $('go').onclick = async () => {
   const reuse = $('reuse') && $('reuse').checked ? $('reuseFile').value : null;
   const quality = document.querySelector('input[name=q]:checked').value;
   const r = await post('/run', { folder: info.folder, fit: $('fit') ? $('fit').value : null, outputs: outputs(), reuse,
-    quality, upload: $('oStream').checked && $('oUpload').checked, title: $('title').value.trim() || null });
+    quality, upload: $('oStream').checked && $('oUpload').checked, title: $('title').value.trim() || null,
+    yaw: Number($('previewYaw').value), pitch: Number($('previewPitch').value), fov: Number($('previewFov').value) });
   if (r.error) { $('state').innerHTML = `<span class="err">${esc(r.error)}</span>`; return; }
   running = true; update(); $('outs').innerHTML = ''; $('log').style.display = ''; $('shareBox').style.display = 'none'; poll();
 };
@@ -312,7 +349,7 @@ async function poll() {
   if (s.error) $('state').innerHTML = `<span class="err">Stopped: ${esc(s.error)}</span>`;
   if (s.running) return setTimeout(poll, 1000);
   running = false; update(); look();
-  const names = { full: 'Full size', stream: 'Streaming', phone: 'Phone' };
+  const names = { full: 'Full size', stream: 'Streaming', phone: 'Phone', preview: 'Quick preview' };
   $('outs').innerHTML = s.outputs.map((o, i) => `<div class="out"><div><b>${names[o.kind]}</b> <span class="muted">${o.mb >= 1000 ? (o.mb / 1000).toFixed(1) + ' GB' : o.mb + ' MB'}</span><br><code>${esc(o.path.split('/').pop())}</code>${o.link ? `<br>Link to send: <a href="${esc(o.link)}" target="_blank" style="color:var(--accent)">${esc(o.link)}</a>` : ''}</div><button data-i="${i}">Show in Finder</button></div>`).join('');
   $('outs').querySelectorAll('button').forEach(b => b.onclick = () => post('/reveal', { path: s.outputs[b.dataset.i].path }));
   stream = s.outputs.find(o => o.kind === 'stream'); share();
