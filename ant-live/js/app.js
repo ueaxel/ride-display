@@ -2,7 +2,7 @@
 import { AntScanner, UsbStick, SerialStick, usbAvailable, serialAvailable } from './ant.js';
 import { DeviceDecoder, FIELDS, formatValue, encodeAntLive, ANTLIVE_TYPE, ANTLIVE_TRANS } from './profiles.js';
 
-export const APP_VERSION = '2 · 261126_1435';
+export const APP_VERSION = '3 · 261126_1442';
 
 const $ = id => document.getElementById(id);
 const devices = new Map();          // key → { dec, el, hist }

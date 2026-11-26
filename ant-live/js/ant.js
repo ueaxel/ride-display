@@ -80,7 +80,11 @@ export function parseData(m) {
       out.deviceNumber |= (out.transType >> 4) << 16;
       p += 4;
     }
-    if (flag & 0x40) { out.rssi = (d[p + 1] << 24 >> 24); p += 3; }   // measurement type, RSSI (dBm), threshold
+    if (flag & 0x40) {                     // measurement type, RSSI (dBm), threshold
+      const r = d[p + 1] << 24 >> 24;
+      if (r < 0) out.rssi = r;             // ANT USBStick2 sends 0 here: no reading
+      p += 3;
+    }
     if (flag & 0x20) { out.rxTime = d[p] | d[p + 1] << 8; p += 2; }
   }
   return out;
