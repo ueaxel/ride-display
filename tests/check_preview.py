@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,12 @@ def main():
         body = maker.RIDE_UUID + json.dumps(meta).encode()
         with source.open('ab') as file:
             file.write(struct.pack('>I4s', len(body) + 8, b'uuid') + body)
+        (folder / 'GS019999.LRV').write_bytes(b'damaged proxy')
+        original = {'orig': folder / 'GS019999.360', 'video': source, 'offset': maker.read_fit(fit)['start'],
+                    'info': {'duration': 4}, 'vinfo': {'width': 320, 'height': 160}, 'convert': True}
+        with patch.object(maker, 'plan', return_value=(maker.read_fit(fit), [original])):
+            _, _, selected = preview.preview_sources(folder)
+            assert 'proxy' not in selected[0]
         output, _, pieces = preview.preview_sources(source)
         assert [(p['start'], p['r'], p['dur']) for p in pieces] == [(1, 0, 2), (3, 5, 1)]
         # The normal CLI entry point.

@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import time
 
