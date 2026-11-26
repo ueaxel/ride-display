@@ -1,6 +1,6 @@
 # 0001 · ANT Live: watch values on the Mac through an ANT USB stick
 
-Date: 2026-11-26 · Status: Accepted
+Date: 2026-11-26 · Status: Accepted; decision 3 superseded by [0002](0002-antlive-public-network.md)
 
 ## Context
 

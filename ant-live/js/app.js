@@ -2,7 +2,7 @@
 import { AntScanner, UsbStick, SerialStick, usbAvailable, serialAvailable } from './ant.js';
 import { DeviceDecoder, FIELDS, formatValue, encodeAntLive, ANTLIVE_TYPE, ANTLIVE_TRANS } from './profiles.js';
 
-export const APP_VERSION = '1 · 261126_1000';
+export const APP_VERSION = '2 · 261126_1435';
 
 const $ = id => document.getElementById(id);
 const devices = new Map();          // key → { dec, el, hist }
@@ -28,7 +28,7 @@ async function start(getStick) {
     await stopScanner();
     const stick = await getStick();
     scanner = new AntScanner({ onData, onStatus: status, onEvent: e => logRaw('event: ' + e) });
-    await scanner.start(stick);
+    await scanner.start(stick, $('network').value);
     $('btnUsb').textContent = 'Reconnect';
   } catch (e) {
     status('off');
@@ -151,6 +151,13 @@ $('btnRec').onclick = () => {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `ANT_Live_${stamp}.csv` });
   a.click(); URL.revokeObjectURL(a.href);
   rec = null; $('btnRec').textContent = 'Record CSV'; $('btnRec').classList.remove('on');
+};
+
+// Switch networks on the running stick; cards from the other network go grey and stay for reference.
+try { $('network').value = localStorage.getItem('antlive.network') || 'public'; } catch (e) { /* no storage */ }
+$('network').onchange = async () => {
+  try { localStorage.setItem('antlive.network', $('network').value); } catch (e) { /* no storage */ }
+  if (scanner) { try { await scanner.setup($('network').value); } catch (e) { banner(explain(e)); } }
 };
 
 $('wheel').onchange = () => { for (const d of devices.values()) d.dec.opts.wheel = Number($('wheel').value) / 1000 || 2.096; };

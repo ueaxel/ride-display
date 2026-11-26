@@ -9,7 +9,8 @@ const close = (name, got, want, tol) => { const ok = near(got, want, tol); if (!
 // framing: reset command, checksum = XOR of all bytes
 check('reset frame', [...frame(0x4A, [0])], [0xA4, 0x01, 0x4A, 0x00, 0xEF]);
 check('setup opens scan last', [...scanSetup().at(-1)].slice(0, 4), [0xA4, 1, 0x5B, 0]);
-check('setup network key', [...scanSetup()[1]].slice(3, 12), [0, 0xB9, 0xA5, 0x21, 0xFB, 0xBD, 0x72, 0xC3, 0x45]);
+check('AntLive listens on the public network', [...scanSetup()[1]].slice(3, 12), [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+check('ANT+ network key', [...scanSetup('antplus')[1]].slice(3, 12), [0, 0xB9, 0xA5, 0x21, 0xFB, 0xBD, 0x72, 0xC3, 0x45]);
 
 // a broadcast with channel ID + RSSI, split across two USB reads, with junk in front
 const body = [0, 4, 0, 0, 0x34, 0x12, 7, 72, 0x48, 0xC0, 0x39, 0x30, 120, 0x01, 0x20, 0xC9, 0x80];

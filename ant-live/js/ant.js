@@ -1,12 +1,15 @@
 // ANT serial protocol for a USB ANT stick, and the two ways Chrome can reach one:
 //   WebUSB     Garmin/Dynastream ANT USB-m (0fcf:1009, the small current stick)
 //   Web Serial ANT USB2 (0fcf:1008, CP210x serial chip) and clones that show up as a serial port
-// The stick runs one channel in continuous scan mode on the ANT+ frequency, so it hears every
-// ANT+ device in range at once: watches broadcasting heart rate, the AntLive data field,
-// power meters, speed/cadence sensors, trainers.
+// The stick runs one channel in continuous scan mode on 2457 MHz, so it hears every device in
+// range at once. One network at a time:
+//   public  the AntLive data field (Connect IQ may not transmit on the ANT+ network)
+//   antplus watches broadcasting heart rate, power meters, speed/cadence sensors, trainers
 
 export const SYNC = 0xA4;
 export const ANTPLUS_KEY = [0xB9, 0xA5, 0x21, 0xFB, 0xBD, 0x72, 0xC3, 0x45];   // ANT+ network key
+export const PUBLIC_KEY = [0, 0, 0, 0, 0, 0, 0, 0];                             // public ANT network
+export const NETWORKS = { public: PUBLIC_KEY, antplus: ANTPLUS_KEY };
 export const ANTPLUS_FREQ = 57;                                                // 2457 MHz
 
 export const MSG = {
@@ -22,11 +25,11 @@ export function frame(id, data = []) {
   return Uint8Array.from(out);
 }
 
-// The commands that set the stick up for scanning, in order.
-export function scanSetup() {
+// The commands that set the stick up for scanning one network, in order.
+export function scanSetup(network = 'public') {
   return [
     frame(MSG.RESET, [0]),
-    frame(MSG.NETWORK_KEY, [0, ...ANTPLUS_KEY]),
+    frame(MSG.NETWORK_KEY, [0, ...(NETWORKS[network] || PUBLIC_KEY)]),
     frame(MSG.ASSIGN, [0, 0x00, 0]),           // channel 0, receive (slave), network 0
     frame(MSG.CHANNEL_ID, [0, 0, 0, 0, 0]),    // wildcard: any device number, type, transmission type
     frame(MSG.FREQ, [0, ANTPLUS_FREQ]),
@@ -175,16 +178,23 @@ export class SerialStick {
 // Opens a stick, sets it up for scanning and hands every decoded data message to onData.
 export class AntScanner {
   constructor({ onData, onStatus, onEvent }) { Object.assign(this, { onData, onStatus, onEvent }); this.deframer = new Deframer(); }
-  async start(stick) {
+  async start(stick, network = 'public') {
     this.stick = stick;
+    this.network = network;
     stick.onLost = () => this.onStatus?.('lost', 'The stick stopped answering. Unplug it, plug it back in and press Connect.');
     this.onStatus?.('connecting', stick.label);
     await stick.open(bytes => this.receive(bytes));
-    const cmds = scanSetup();
+    await this.setup();
+    this.onStatus?.('connected', stick.label);
+  }
+  // (Re)configures the stick; also used to switch networks while connected.
+  async setup(network = this.network) {
+    this.network = network;
+    const stick = this.stick;
+    const cmds = scanSetup(network);
     await stick.write(cmds[0]);
     await new Promise(r => setTimeout(r, 600));         // the stick restarts after a reset
     for (const c of cmds.slice(1)) { await stick.write(c); await new Promise(r => setTimeout(r, 60)); }
-    this.onStatus?.('connected', stick.label);
   }
   receive(bytes) {
     for (const m of this.deframer.push(bytes)) {

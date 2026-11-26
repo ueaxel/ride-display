@@ -15,8 +15,8 @@ The watch is not involved and the iPhone doesn't need to be connected. The watch
 [`ant-live/`](ant-live/) shows, in real time, what Garmin watches and ANT+ sensors near the Mac send to an ANT USB stick: [open ANT Live](https://ueaxel.github.io/ride-display/ant-live/) in Chrome, plug in the stick, press **Connect ANT stick**.
 
 - **All values** (HR, power, cadence, speed, distance, timer, altitude, ascent, position, heading, calories, averages and maxima, training effect, Pulse Ox, pressure, temperature, battery, steps): put the **AntLive** data field (Garmin repo, `AntLive/`) on a data screen and start the activity. Works on the FR265 and other Connect IQ watches.
-- **Heart rate only, any Garmin watch, no app:** turn on *Broadcast Heart Rate*.
-- Power meters, speed/cadence sensors, trainers and HR straps in range show up too. **Record CSV** saves everything; **Raw** shows the bytes.
+- **Heart rate only, any Garmin watch, no app:** turn on *Broadcast Heart Rate* and switch the page to *ANT+ sensors & heart-rate broadcast*.
+- That ANT+ setting also shows power meters, speed/cadence sensors, trainers and HR straps. The stick hears one network at a time ([ADR 0002](documentation/adr/0002-antlive-public-network.md)). **Record CSV** saves everything; **Raw** shows the bytes.
 
 Why it works this way: [ADR 0001](documentation/adr/0001-ant-live-reader.md). Test: `node tests/check_ant.mjs`.
 
