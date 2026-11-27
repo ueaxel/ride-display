@@ -60,8 +60,6 @@
   .ff { flex:1; min-width:0; accent-color:var(--ghost); }
   .ffme { display:flex; align-items:center; gap:3px; white-space:nowrap; }
   .ffl { min-width:4.5em; text-align:right; font-variant-numeric:tabular-nums; }
-  .elevbody { display:flex; flex-direction:column; }
-  .elevbody canvas { flex:1; min-height:0; width:100%; }
   .stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:4px 10px; font-size:13px; margin-bottom:6px; }
   .stats b { display:block; font-size:20px; font-variant-numeric: tabular-nums; }
   @media (max-width: 1100px) {
@@ -123,7 +121,8 @@
   body[data-mode=video] header { position:fixed; top:0; left:0; right:0; z-index:20; background:rgba(11,15,20,.8); transition: opacity .4s; flex-wrap:nowrap; overflow-x:auto; }
   body[data-mode=video] #btnFit, body[data-mode=video] .title { display:none; }
   body[data-mode=trainer] #btnGps { display:none; }
-  body[data-mode=video] .banner { position:fixed; top:58px; left:0; right:0; z-index:19; }
+  body[data-mode=video] .banner { position:fixed; top:var(--v-controls-bottom, 92px); right:8px; max-width:min(52%, 680px);
+    z-index:19; pointer-events:none; border-radius:10px; }
   body.chromeless header, body.chromeless .banner { opacity:0; pointer-events:none; }
   body.chromeless { cursor:none; }
   #vStage { position:absolute; inset:0; }
@@ -131,8 +130,18 @@
   #vStage canvas.sphere { position:absolute; inset:0; width:100%; height:100%; display:none; cursor:grab; touch-action:none; }
   #vStage[data-kind="360"] canvas.sphere { display:block; }
   #vStage[data-kind="360"] video.flatvideo { opacity:0; pointer-events:none; }
+  #vPlayback { position:absolute; z-index:13; left:max(8px, env(safe-area-inset-left)); top:calc(var(--v-header-height, 48px) + 6px);
+    display:flex; flex-wrap:wrap; align-items:center; gap:5px; max-width:calc(100% - 16px); padding:4px 6px;
+    color:#f2f5f8; background:rgba(11,15,20,.8); border-radius:10px; font-size:11px; }
+  #vPlayback button { min-height:30px; padding:3px 8px; font-size:12px; }
+  #vPlayback button:disabled { opacity:.45; cursor:default; }
+  #vPlayback label { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  #vOpacity { width:58px; margin:0; accent-color:var(--ghost); }
+  #vElev { display:block; width:100%; height:100%; touch-action:pan-y; }
+  #vElev[aria-disabled=false] { cursor:ew-resize; }
+  #vElev:focus-visible { outline:2px solid var(--ghost); outline-offset:-2px; }
   .vmsg { position:absolute; left:50%; top:45%; transform:translate(-50%,-50%); color:#fff; font-size:22px; text-shadow:0 2px 8px #000; text-align:center; pointer-events:none; z-index:5; }
-  .float { position:absolute; z-index:10; background:rgba(11,15,20,.58); border:1px solid rgba(255,255,255,.12); border-radius:14px;
+  .float { position:absolute; z-index:10; background:rgba(11,15,20,var(--v-panel-opacity,.58)); border:1px solid rgba(255,255,255,.12); border-radius:14px;
     display:flex; flex-direction:column; min-width:120px; min-height:80px; overflow:hidden; }
   .fhead { display:flex; align-items:center; gap:8px; padding:4px 8px 2px 10px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); cursor:move; touch-action:none; user-select:none; }
   .fhead .fclose { margin-left:auto; background:none; border:none; color:var(--muted); padding:0 4px; font-size:15px; cursor:pointer; }
@@ -146,6 +155,9 @@
   .vnums .v { white-space:nowrap; font-size:clamp(18px, 2.6vw, 44px); font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; text-shadow:0 1px 4px #000; }
   /* no Web Bluetooth (iPhone): no sensor or trainer controls, Play still works */
   body.nobt header #btnHr, body.nobt header #btnTrainer, body.nobt header #btnCad, body.nobt header #btnOx, body.nobt header #ctlMode, body.nobt header #btnBrake { display:none; }
+  @media (max-height: 500px), (max-width: 640px) {
+    body[data-mode=video] .banner { top:auto; bottom:8px; left:8px; right:auto; max-width:60%; }
+  }
   @media (max-height: 500px) {
     body[data-mode=video] header { padding:4px 8px; gap:6px; }
     body[data-mode=video] header button, body[data-mode=video] header select { padding:4px 10px; font-size:13px; }
@@ -170,7 +182,7 @@
   #vSync .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   #vSyncMap { flex:1; min-height:120px; cursor:crosshair; }
   #vSyncSlider { flex:1; }
-  .syncing .float[data-panel], .syncing .junction { display:none !important; }
+  .syncing .float[data-panel], .syncing .junction, .syncing #vPlayback { display:none !important; }
   .cliprow { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
   .cliprow > div { flex:1; font-size:14px; }
   .riderow { flex-wrap:wrap; }
@@ -318,6 +330,13 @@
 <main id="videoScreen">
   <div id="vStage"></div>
   <div class="vmsg" id="vMsg"></div>
+  <div id="vPlayback" role="group" aria-label="Ride playback">
+    <button id="vBack15" disabled aria-label="Back 15 seconds">−15 s</button>
+    <button id="vPlay" class="ffplay" disabled aria-label="Play the original ride">▶</button>
+    <button id="vForward15" disabled aria-label="Forward 15 seconds">+15 s</button>
+    <label title="Move the video and your rider when scrubbing the profile"><input type="checkbox" id="vMoveMe" checked> me too</label>
+    <label>Opacity <input type="range" id="vOpacity" min="0" max="100" value="58" aria-label="Overlay background opacity"></label>
+  </div>
   <section class="float" data-panel="numbers"><div class="fhead">Ride<button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><div class="vnums">
       <div><div class="label" id="vPowerLabel">Trainer set, W</div><div class="v" id="vPower">–</div><div class="s" id="vTarget"></div></div>
@@ -330,9 +349,9 @@
       <div><div class="label">Distance</div><div class="v" id="vDist">0.00</div><div class="s">km</div></div>
       <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
     </div></div><div class="grip"></div></section>
-  <section class="float" data-panel="elev"><div class="fhead">Elevation, whole ride<button class="fclose" title="Hide">×</button></div>
-    <div class="fbody elevbody"><canvas id="vElev"></canvas>
-      <div class="ffrow"><button class="ffplay" title="Play the original ride">▶</button><input type="range" class="ff" id="ffV" min="0" max="1000" step="1" value="0" title="Move the ghost (and the team) along the route"><label class="ffme"><input type="checkbox" class="ffMe" checked> me too</label><span class="ffl" id="ffVl"></span></div></div><div class="grip"></div></section>
+  <section class="float" data-panel="elev"><div class="fhead">Elevation &amp; power<button class="fclose" title="Hide">×</button></div>
+    <div class="fbody"><canvas id="vElev" role="slider" tabindex="0" aria-label="Ride position"
+      aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag along the profile to seek"></canvas></div><div class="grip"></div></section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vMap"></canvas><div id="vMapInfo" class="mapinfo"></div></div><div class="grip"></div></section>
   <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>

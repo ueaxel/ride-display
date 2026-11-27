@@ -25,7 +25,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '51 · 261124_1508 (raw recording at full resolution; dark screen)';
+export const APP_VERSION = '52 · 261127 (video playback and rider overlays)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -45,7 +45,7 @@ let refs = store.get('refs', []);                // [{name, prof}]
 let ref = null;
 let streets = null;                              // OSM streets along the reference route
 let streetsNote = '';
-const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0,
+const live = { power: null, cadence: null, speed: null, hr: null, tPower: 0, tHr: 0, watts: null, tWatts: 0, fix: null, tFix: 0, cadSensor: null, tCad: 0,
   spo2: null, oxPr: null, oxPi: null, tOx: 0, oxWave: [], oxBeat: 0, oxHex: [] };
 const links = {};
 const raw = new RawLog();                        // raw recording: every sensor value as it arrives
@@ -205,6 +205,10 @@ function tick() {
   dist = pos;                                     // (the video screen may have switched clips)
   if (!moving) { render(); return; }
 
+  if (mode === 'video' && !replay && !S.replay) {
+    const watts = demo ? power : links.trainer && now - live.tWatts < 3000 ? live.watts : null;
+    video?.recordRider(dist, watts, hr);
+  }
   S.power.push(indoorMode() ? power : null);
   const pNow = indoorMode() ? power : outPower.p3 ?? 0;
   S.pEst.push(Math.round(pNow)); S.work.push((last(S.work) ?? 0) + pNow);
@@ -291,6 +295,7 @@ async function restoreRide() {
 // Switch to another route (video clip) at position p on it, e.g. at a junction.
 // The ghost is lined up with you there; distance ridden carries on.
 function switchRef(newRef, p, key) {
+  if (mode === 'video') video?.breakPowerTrace();
   ref = newRef; refKey = key || newRef.name;
   pos = p; indoor.dist = p;
   offset = clock.seconds - newRef.timeAt(p);
@@ -519,40 +524,43 @@ function renderGhost(t, you, ghost, gapM, gapS, hr) {
 // ------------------------------------------------------------------ actions
 
 // ------------------------------------------------------------------ fast forward
-// The slider under the elevation profile moves the ghost along the route;
-// the team follows (same clock, their stops smoothed out like the ghost's).
-// "me too" (trainer and video screens) takes you to the same spot, so you
-// skip ahead together.
+// Move the ghost and team together. "me too" also moves the indoor rider.
 function jumpGhostTo(d, moveMe) {
   if (!ref) return;
   d = Math.max(0, Math.min(ref.total, d));
   if (replay) { replay.t = ref.timeAt(d); moveMe = true; }
   offset = clock.seconds - ref.timeAt(d);
-  if (moveMe && indoorMode()) { indoor.dist = d; pos = d; }
+  if (moveMe && indoorMode()) {
+    if (mode === 'video' && d !== pos) video?.breakPowerTrace();
+    indoor.dist = d; pos = d; lastTickAt = Date.now();
+  }
   if (S.gapM.length) { S.gapM[S.gapM.length - 1] = pos - d; S.gapS[S.gapS.length - 1] = ref.timeAt(Math.min(pos, ref.total)) - ref.timeAt(d); }
   finished = null;
   ctlSent = { v: null, at: 0 };
   render();
 }
 function syncSliders(ghost) {
-  for (const b of document.querySelectorAll('.ffplay')) { b.textContent = replay && running ? '⏸' : '▶'; b.title = replay && running ? 'Pause' : 'Play the original ride'; }
-  for (const id of ['ffT', 'ffV']) {
-    const el = $(id);
-    if (!el || el.matches(':active') || el.dataset.drag) continue;
-    el.disabled = !ref;
-    el.value = ref && ghost != null ? Math.round(1000 * ghost / ref.total) : 0;
-    $(id + 'l').textContent = ref && ghost != null ? `${(ghost / 1000).toFixed(2)} km` : '';
+  for (const b of document.querySelectorAll('.ffplay')) {
+    b.textContent = replay && running ? '⏸' : '▶';
+    b.title = replay && running ? 'Pause the original ride' : 'Play the original ride';
+    b.setAttribute('aria-label', b.title);
   }
+  const el = $('ffT');
+  if (el.matches(':active') || el.dataset.drag) return;
+  el.disabled = !ref;
+  el.value = ref && ghost != null ? Math.round(1000 * ghost / ref.total) : 0;
+  $('ffTl').textContent = ref && ghost != null ? `${(ghost / 1000).toFixed(2)} km` : '';
 }
 for (const b of document.querySelectorAll('.ffplay')) b.onclick = togglePlay;
-for (const id of ['ffT', 'ffV']) {
-  const el = $(id);
-  el.addEventListener('input', () => { el.dataset.drag = '1'; if (ref) $(id + 'l').textContent = `${(el.value / 1000 * ref.total / 1000).toFixed(2)} km`; });
-  el.addEventListener('change', () => {
-    delete el.dataset.drag;
-    if (ref) jumpGhostTo(el.value / 1000 * ref.total, el.parentElement.querySelector('.ffMe').checked);
-  });
-}
+const trainerSeek = $('ffT');
+trainerSeek.addEventListener('input', () => {
+  trainerSeek.dataset.drag = '1';
+  if (ref) $('ffTl').textContent = `${(trainerSeek.value / 1000 * ref.total / 1000).toFixed(2)} km`;
+});
+trainerSeek.addEventListener('change', () => {
+  delete trainerSeek.dataset.drag;
+  if (ref) jumpGhostTo(trainerSeek.value / 1000 * ref.total, trainerSeek.parentElement.querySelector('.ffMe').checked);
+});
 
 // ------------------------------------------------------------------ team rides
 // More rides of the same route as extra ghosts (dots on the map and the
@@ -634,7 +642,12 @@ function toggleBrake() { if (indoorMode()) setBrake(!braking); }
 // the ghost's position; no trainer control, nothing saved.
 function togglePlay() {
   if (!ref) { banner('Load a reference ride (or a ride video) first.'); return; }
-  if (replay) { replay = null; running = false; render(); return; }
+  if (replay) {
+    replay = null; running = false;
+    live.tPower = live.tHr = 0;
+    render();
+    return;
+  }
   if (running) toggleStart();                     // your own ride stops (kept in My rides) and the original plays
   const from = Math.min(ref.total - 1, Math.max(0, ref.distAtTime(clock.seconds - offset)));
   if (S.wall.length || finished) newRide();
@@ -1073,7 +1086,7 @@ function drawOx() {
   $('oxNote').style.display = oxOn() && Date.now() - live.tOx < 5000 ? 'none' : '';
 }
 const onTrainerData = d => {
-  if (d.power != null) live.power = d.power;
+  if (d.power != null) { live.power = live.watts = d.power; live.tWatts = Date.now(); }
   if (d.cadence != null) live.cadence = d.cadence;
   live.speed = d.speed ?? null; live.tPower = Date.now();
   raw.add({ power: d.power, cadence: d.cadence, speed_kmh: d.speed });
@@ -1197,7 +1210,7 @@ const RESET_KEYS = ['AudioVolumeUp', 'VolumeUp', 'Enter', ' ', 'PageDown', 'Arro
 const BRAKE_KEYS = ['AudioVolumeDown', 'VolumeDown', 'PageUp', 'ArrowLeft', 'ArrowUp', 'MediaTrackPrevious', 'b', 'B'];
 window.addEventListener('keydown', e => {
   if ($('dlgSettings').open) { $('keyTest').textContent = `Got "${e.key}"` + (RESET_KEYS.includes(e.key) ? ' — this button resets the gap.' : BRAKE_KEYS.includes(e.key) ? ' — this button brakes (trainer / video screen).' : ' — not used.'); e.preventDefault(); return; }
-  if (e.target.closest('input, select, textarea') || document.querySelector('dialog[open]')) return;
+  if (e.target.closest('input, select, textarea, #vPlayback button') || document.querySelector('dialog[open]')) return;
   if (RESET_KEYS.includes(e.key) && (mode === 'ghost' || e.key !== ' ')) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
   else if (BRAKE_KEYS.includes(e.key) && indoorMode()) { e.preventDefault(); toggleBrake(); }
 });
@@ -1277,7 +1290,7 @@ video = initVideoScreen({
   // position now, between the 1-s ticks (smooth video)
   posNow() { return live.moving && running && !finished ? pos + (live.speedNow || 0) * Math.min(1.5, (Date.now() - lastTickAt) / 1000) : pos; },
   get braking() { return braking; }, workVsGhost, teamAt: () => (ref ? teamAt(clock.seconds) : []),
-  switchRef, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
+  switchRef, jumpGhostTo, get replaying() { return !!replay; }, render: () => render(), banner, $, fmtTime, sign, gapClass, avgLast, last,
 });
 newRide();
 if (refs.length && store.get('refIndex', 0) >= 0) selectRef(Math.max(0, Math.min(refs.length - 1, store.get('refIndex', 0))));

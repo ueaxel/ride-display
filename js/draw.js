@@ -269,32 +269,65 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   }
 }
 
-// The whole ride's elevation, plain (see-through grey over the video), with
-// dots for you and the ghost riding along it.
-export function drawElevationPlain(canvas, ref, you = null, ghost = null, team = []) {
+export const VIDEO_PROFILE_PADDING = 6;
+
+// Whole-ride elevation and power share a route-distance axis.
+export function drawElevationPlain(canvas, ref, you = null, ghost = null, team = [], rider = []) {
   const ctx = fit(canvas);
-  if (!ref || !ref.hasAlt) return message(ctx, ref ? 'No altitude in this ride' : '');
+  if (!ref?.total) return;
   const P = ref.prof, n = ref.n;
+  const L = VIDEO_PROFILE_PADDING, R = ctx.w - L, T = 8, B = ctx.h - 14;
+  if (R <= L || B <= T) return;
+  const X = d => L + (R - L) * Math.max(0, Math.min(ref.total, d)) / ref.total;
+  const step = Math.max(1, Math.floor(n / (R - L)));
   let a0 = Infinity, a1 = -Infinity;
-  for (const a of P.a) { a0 = Math.min(a0, a); a1 = Math.max(a1, a); }
+  for (const a of P.a || []) { a0 = Math.min(a0, a); a1 = Math.max(a1, a); }
   a1 = Math.max(a1, a0 + 20);
-  const L = 6, R = 6, T = 8, B = 14;
-  const X = d => L + (ctx.w - L - R) * d / ref.total, Y = a => ctx.h - B - (ctx.h - T - B) * (a - a0) / (a1 - a0);
-  const step = Math.max(1, Math.floor(n / (ctx.w - L - R)));
-  ctx.beginPath(); ctx.moveTo(X(0), ctx.h - B);
-  for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), Y(P.a[i]));
-  ctx.lineTo(X(ref.total), Y(P.a[n - 1])); ctx.lineTo(X(ref.total), ctx.h - B); ctx.closePath();
-  ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+  const Y = a => B - (B - T) * (a - a0) / (a1 - a0);
+  if (ref.hasAlt) {
+    ctx.beginPath(); ctx.moveTo(X(0), B);
+    for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), Y(P.a[i]));
+    ctx.lineTo(X(ref.total), Y(P.a[n - 1])); ctx.lineTo(X(ref.total), B); ctx.closePath();
+    ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+
+  let peak = 0;
+  for (const watts of P.p || []) peak = Math.max(peak, watts);
+  for (const point of rider) if (point) peak = Math.max(peak, point[1]);
+  const maxW = Math.max(100, Math.ceil(peak / 50) * 50);
+  const wattsY = p => B - (B - T) * p / maxW;
+  if (ref.hasPower) {
+    ctx.strokeStyle = C.ghost; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.moveTo(X(P.d[0]), wattsY(P.p[0]));
+    for (let i = step; i < n; i += step) ctx.lineTo(X(P.d[i]), wattsY(P.p[i]));
+    ctx.lineTo(X(ref.total), wattsY(P.p[n - 1])); ctx.stroke();
+  }
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath();
+  let connected = false, latest = null;
+  for (const point of rider) {
+    if (!point) { connected = false; continue; }
+    const [d, watts] = point;
+    if (connected) ctx.lineTo(X(d), wattsY(watts));
+    else ctx.moveTo(X(d), wattsY(watts));
+    connected = true; latest = point;
+  }
+  ctx.stroke();
+  if (latest) dot(ctx, X(latest[0]), wattsY(latest[1]), 2, '#fff');
+
   ctx.fillStyle = '#C9D1DC'; ctx.font = '11px system-ui'; ctx.textAlign = 'left';
   ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
-  ctx.fillText(`${Math.round(a0)}–${Math.round(a1)} m`, L, ctx.h - 2);
-  ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, ctx.w - R, ctx.h - 2);
+  if (ref.hasAlt) ctx.fillText(`${Math.round(a0)}–${Math.round(a1)} m`, L, ctx.h - 2);
+  if (ref.hasPower || latest) {
+    ctx.textAlign = 'center'; ctx.fillText(`0–${maxW} W`, (L + R) / 2, ctx.h - 2);
+  }
+  ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, R, ctx.h - 2);
   ctx.shadowBlur = 0;
-  const at = d => { d = Math.max(0, Math.min(ref.total, d)); return [X(d), Y(ref.at('a', d))]; };
-  for (const m of team || []) { const [x, y] = at(m.d); dot(ctx, x, y, 5, m.color); }
-  if (ghost != null) { const [x, y] = at(ghost); dot(ctx, x, y, 6, C.ghost); }
-  if (you != null) { const [x, y] = at(you); dot(ctx, x, y, 6, '#FFFFFF'); }
+
+  const at = d => [X(d), ref.hasAlt ? Y(ref.at('a', d)) : B];
+  for (const m of team) { const [x, y] = at(m.d); dot(ctx, x, y, 5, m.color); }
+  if (ghost != null) { const [x, y] = at(ghost); dot(ctx, x, y, 5, C.ghost); }
+  if (you != null) { const [x, y] = at(you); dot(ctx, x, y, 3, '#fff'); }
 }
 
 // Elevation profile with you and the ghost.
@@ -357,32 +390,51 @@ function gridAxes(ctx, box, xr, xs, yr, ys, xlab, ylab) {
 
 const nice = (lo, hi, step) => [Math.floor(lo / step) * step, Math.ceil(hi / step) * step];
 
-// HR against power. Points fade with age (like the watch); the current point is yellow.
-export function drawScatter(canvas, power, hr, now, { avg = 10 } = {}) {
+// HR against rolling average power, with both series sharing the same axes.
+export function drawScatter(canvas, power, hr, now, { avg = 10, comparison = null } = {}) {
   const ctx = fit(canvas);
-  const pts = [];
-  let s = 0, k = 0;
-  for (let i = 0; i < power.length; i++) {
-    s += power[i] ?? 0; k++;
-    if (i >= avg) { s -= power[i - avg] ?? 0; k--; }
-    if (hr[i] > 0 && i >= avg - 1) pts.push([s / k, hr[i], i]);
+  function points(power, hr, now) {
+    const pts = [];
+    let sum = 0, count = 0;
+    for (let i = 0; i < power.length && i <= now; i++) {
+      if (Number.isFinite(power[i])) { sum += power[i]; count++; }
+      if (i >= avg && Number.isFinite(power[i - avg])) { sum -= power[i - avg]; count--; }
+      if (hr[i] > 0 && i >= avg - 1 && (!comparison || count === avg)) pts.push([sum / avg, hr[i], now - i]);
+    }
+    return pts;
   }
-  if (pts.length < 5) return message(ctx, 'HR vs power appears once you ride');
+  const you = points(power, hr, now), ghost = comparison?.ghost;
+  const theirs = ghost ? points(ghost.power, ghost.hr, ghost.now) : [];
+  if (you.length + theirs.length < (comparison ? 1 : 5)) {
+    return message(ctx, comparison ? 'Waiting for power and heart rate' : 'HR vs power appears once you ride');
+  }
   let p1 = 100, h0 = 250, h1 = 0;
-  for (const [p, h] of pts) { p1 = Math.max(p1, p); h0 = Math.min(h0, h); h1 = Math.max(h1, h); }
-  // grid lines on round numbers: every 50 W and every 20 bpm
+  for (const series of [you, theirs]) {
+    for (const [p, h] of series) { p1 = Math.max(p1, p); h0 = Math.min(h0, h); h1 = Math.max(h1, h); }
+  }
   const xr = nice(0, p1 * 1.05, 50), yr = nice(h0 - 3, h1 + 3, 20);
-  const box = { L: 46, R: ctx.w - 12, T: 10, B: ctx.h - 38 };
+  const box = { L: 46, R: ctx.w - 12, T: comparison ? 22 : 10, B: ctx.h - 38 };
+  if (box.R <= box.L || box.B <= box.T) return;
   gridAxes(ctx, box, xr, 50, yr, 20, `Power, ${avg}-s average (W)`, 'Heart rate (bpm)');
   const X = p => box.L + (box.R - box.L) * (p - xr[0]) / (xr[1] - xr[0]);
   const Y = h => box.B - (box.B - box.T) * (h - yr[0]) / (yr[1] - yr[0]);
-  for (const [p, h, i] of pts) {
-    const age = now - i;
-    ctx.fillStyle = age < 120 ? '#55D6C2' : age < 360 ? '#328D82' : '#20514F';
-    ctx.beginPath(); ctx.arc(X(p), Y(h), age < 120 ? 3 : 2.2, 0, 7); ctx.fill();
+  const paint = (series, color, radius) => {
+    for (const [p, h, age] of series) {
+      ctx.globalAlpha = comparison ? Math.max(0.17, Math.exp(-age / 165)) : 1;
+      ctx.fillStyle = comparison ? color : age < 120 ? '#55D6C2' : age < 360 ? '#328D82' : '#20514F';
+      ctx.beginPath(); ctx.arc(X(p), Y(h), age < 120 ? 3 : 2.2, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    const latest = series[series.length - 1];
+    if (latest && (!comparison || latest[2] === 0)) dot(ctx, X(latest[0]), Y(latest[1]), radius, color);
+  };
+  paint(theirs, C.ghost, 7);
+  paint(you, comparison ? '#fff' : C.accent, comparison ? 4 : 6);
+  if (comparison) {
+    ctx.font = '11px system-ui'; ctx.textAlign = 'left';
+    ctx.fillStyle = C.ghost; ctx.fillText('Ghost', box.L, 12);
+    ctx.fillStyle = '#fff'; ctx.fillText('You', box.L + 42, 12);
   }
-  const [p, h] = pts[pts.length - 1];
-  dot(ctx, X(p), Y(h), 6, C.accent);
 }
 
 // Power and HR over time (yours solid, the reference ride's dashed purple).

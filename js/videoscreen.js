@@ -50,6 +50,9 @@ export function initVideoScreen(api) {
   function place(p) {
     const L = layout[p.dataset.panel];
     Object.assign(p.style, { left: `${L.x * 100}%`, top: `${L.y * 100}%`, width: `${L.w * 100}%`, height: `${L.h * 100}%` });
+    if (p.dataset.panel === 'numbers' && L.x < 0.4 && L.y <= 0.12) {
+      p.style.top = `max(${L.y * 100}%, var(--v-controls-bottom, 0px))`;
+    }
     p.style.display = L.on ? '' : 'none';
   }
   function saveLayout() { store.set('videoLayout', layout); }
@@ -129,6 +132,114 @@ export function initVideoScreen(api) {
   const wake = () => { document.body.classList.remove('chromeless'); clearTimeout(hideTimer);
     hideTimer = setTimeout(() => { if (api.running && document.body.dataset.mode === 'video' && !syncing) document.body.classList.add('chromeless'); }, 4000); };
   ['pointermove', 'pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, wake));
+
+  // ---------------------------------------------------------------- playback and overlays
+  const playback = $('vPlayback'), profile = $('vElev'), moveMe = $('vMoveMe'), opacity = $('vOpacity');
+  const header = document.querySelector('header');
+  const controlsSize = new ResizeObserver(() => {
+    screen.style.setProperty('--v-header-height', `${header.offsetHeight}px`);
+    document.body.style.setProperty('--v-controls-bottom', `${header.offsetHeight + playback.offsetHeight + 12}px`);
+  });
+  controlsSize.observe(header);
+  controlsSize.observe(playback);
+  function setOpacity() { screen.style.setProperty('--v-panel-opacity', opacity.value / 100); }
+  opacity.value = store.get('videoOverlayOpacity', 58);
+  setOpacity();
+  opacity.oninput = setOpacity;
+  opacity.onchange = () => store.set('videoOverlayOpacity', +opacity.value);
+
+  const clamp = (value, max) => Math.max(0, Math.min(max, value));
+  let pendingSeek = false;
+  function activeClip() {
+    const c = clips[cur];
+    return c && c.ref === api.ref ? c : null;
+  }
+  function seekRoute(distance, moveRider) {
+    if (!api.ref?.total || syncing) return;
+    if (moveRider || api.replaying) pendingSeek = true;
+    api.jumpGhostTo(distance, moveRider);
+  }
+  function skip(seconds, moveRider, from) {
+    const ref = api.ref;
+    if (!ref?.total || syncing) return;
+    const distance = clamp(from, ref.total);
+    const c = activeClip();
+    const current = c?.videoTime(distance);
+    if (!Number.isFinite(current) || !c.covers(distance)) {
+      seekRoute(ref.distAtElapsed(ref.elapsedAt(distance) + seconds), moveRider);
+      return;
+    }
+    // Chapter times are local to each file. Carry any remaining seconds into
+    // the neighbouring file, or clamp to the first/last frame of the ride video.
+    const chapters = c.chapters || [c];
+    let i = chapters.indexOf(c), time = current + seconds;
+    while (time < 0 && i > 0) time += chapters[--i].duration;
+    while (chapters[i].duration && time > chapters[i].duration && i < chapters.length - 1) time -= chapters[i++].duration;
+    seekRoute(chapters[i].distAtVideo(clamp(time, chapters[i].duration || Infinity)), moveRider);
+  }
+  $('vBack15').onclick = () => skip(-15, true, api.posNow());
+  $('vForward15').onclick = () => skip(15, true, api.posNow());
+
+  let scrubPointer = null;
+  function scrub(event) {
+    const { left, width } = profile.getBoundingClientRect();
+    const pad = D.VIDEO_PROFILE_PADDING;
+    if (width <= 2 * pad) return;
+    const ratio = clamp((event.clientX - left - pad) / (width - 2 * pad), 1);
+    seekRoute(ratio * api.ref.total, moveMe.checked);
+  }
+  profile.addEventListener('pointerdown', event => {
+    if (scrubPointer != null || event.button !== 0 || !api.ref?.total || syncing) return;
+    scrubPointer = event.pointerId;
+    profile.focus({ preventScroll: true });
+    profile.setPointerCapture(scrubPointer);
+    scrub(event);
+  });
+  profile.addEventListener('pointermove', event => {
+    if (event.pointerId === scrubPointer && api.ref?.total) scrub(event);
+  });
+  profile.addEventListener('lostpointercapture', event => {
+    if (event.pointerId === scrubPointer) scrubPointer = null;
+  });
+  profile.addEventListener('keydown', event => {
+    if (!api.ref?.total || syncing) return;
+    const seconds = { ArrowLeft: -15, ArrowDown: -15, ArrowRight: 15, ArrowUp: 15 }[event.key];
+    if (!seconds && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (seconds) {
+      const from = moveMe.checked ? api.posNow() : lastState?.ghost ?? 0;
+      skip(seconds, moveMe.checked, from);
+    } else seekRoute(event.key === 'Home' ? 0 : api.ref.total, moveMe.checked);
+  });
+
+  const riderPower = [], riderHr = [], traces = new Map(), ghostSamples = new WeakMap();
+  let trace = null;
+  function breakPowerTrace() {
+    if (trace?.length && trace[trace.length - 1] !== null) trace.push(null);
+  }
+  function recordRider(distance, watts, hr) {
+    riderPower.push(watts);
+    riderHr.push(hr);
+    const ref = api.ref;
+    if (!ref) { breakPowerTrace(); trace = null; return; }
+    if (!traces.has(ref)) traces.set(ref, []);
+    const points = traces.get(ref);
+    if (points !== trace) { breakPowerTrace(); trace = points; }
+    if (Number.isFinite(watts)) trace.push([Math.min(distance, ref.total), watts]);
+    else breakPowerTrace();
+  }
+  function ghostScatter(ref, distance) {
+    if (!ref?.hasPower || !ref.prof.hr || distance == null) return null;
+    if (!ghostSamples.has(ref)) ghostSamples.set(ref, { power: [], hr: [] });
+    const samples = ghostSamples.get(ref), now = Math.min(Math.floor(ref.totalTime), Math.floor(ref.timeAt(distance) + 1e-6));
+    for (let t = samples.power.length; t <= now; t++) {
+      const d = ref.distAtTime(t);
+      samples.power.push(ref.at('p', d));
+      samples.hr.push(ref.at('hr', d));
+    }
+    return { ...samples, now };
+  }
 
   // ---------------------------------------------------------------- clips
   async function refreshClips(files) {
@@ -312,6 +423,7 @@ export function initVideoScreen(api) {
     const g = clips[i].chapters || [clips[i]];
     const pick = g.find(m => m.covers(p)) || clips[i];
     i = clips.indexOf(pick);
+    pendingSeek = false;
     cur = i; setTimeout(updateTurnBtn);
     const c = clips[i];
     view.load(c.url);
@@ -351,6 +463,7 @@ export function initVideoScreen(api) {
     const lookOff = view.yaw - (clips[cur].forward || 0);      // keep where you were looking
     const g = clips[ch.clip].chapters || [clips[ch.clip]];
     const cand = g.find(m => { const q = net.transfer(cur, api.pos, clips.indexOf(m)); return q != null && m.covers(q); }) || clips[ch.clip];
+    pendingSeek = false;
     cur = clips.indexOf(cand); setTimeout(updateTurnBtn);
     const c = clips[cur];
     view.load(c.url);
@@ -369,7 +482,7 @@ export function initVideoScreen(api) {
   // Find a recognisable spot in the video, then click it on the map.
   let syncClip = -1;
   function openSync(i) {
-    syncing = true; syncClip = i; syncChanged = false;
+    syncing = true; pendingSeek = false; syncClip = i; syncChanged = false;
     const c = clips[i];
     if (cur !== i) { cur = i; view.load(c.url); api.switchRef(c.ref, Math.max(0, c.videoRange[0]), 'clip:' + c.id); }
     screen.classList.add('syncing');
@@ -452,7 +565,7 @@ export function initVideoScreen(api) {
     if (document.body.dataset.mode !== 'video' || syncing || cur < 0) return;
     const c = clips[cur];
     if (!c || c.ref !== api.ref) return;
-    const p = api.posNow();
+    const p = pendingSeek ? api.pos : api.posNow();
     // past the end (or before the start) of this chapter: switch to the chapter that has it
     if (c.chapters && c.chapters.length > 1 && !c.covers(p)) {
       const next = c.chapters.find(m => m !== c && m.covers(p));
@@ -467,6 +580,14 @@ export function initVideoScreen(api) {
     let dvd = (c.videoTime(p + 5) - c.videoTime(p - 5)) / 10;
     if (!Number.isFinite(dvd)) dvd = 1 / Math.max(1, api.live.speedNow || 1);
     const flow = api.running && api.live.moving ? Math.max(0, Math.min(4, dvd * (api.live.speedNow || 0))) : 0;
+    if (pendingSeek && view.ready && !view.video.seeking) {
+      pendingSeek = false;
+      if (Number.isFinite(target)) {
+        const v = view.video;
+        const time = clamp(target, v.duration || Infinity);
+        if (Math.abs(time - v.currentTime) > 0.02) v.currentTime = time;
+      }
+    }
     follower.update(target, flow);
     // video exported with World Lock: its picture keeps the direction the camera
     // had when recording started, so turn the view by how much the road has turned since
@@ -521,7 +642,13 @@ export function initVideoScreen(api) {
       if (api.ref && gapM != null) { g.textContent = `${api.sign(gapM)} m`; g.className = 'v ' + api.gapClass(gapM); set('vGapS', `${api.sign(gapS)} s`); }
       else { g.textContent = '–'; g.className = 'v'; set('vGapS', ''); }
     }
-    if (layout.elev.on) D.drawElevationPlain($('vElev'), api.ref, you, ghost, api.teamAt());
+    const ref = api.ref, canSeek = !!ref?.total;
+    for (const button of ['vBack15', 'vForward15', 'vPlay', 'vMoveMe']) $(button).disabled = !canSeek;
+    profile.setAttribute('aria-disabled', String(!canSeek));
+    profile.setAttribute('aria-valuemax', String(Math.round(ref?.total || 0)));
+    profile.setAttribute('aria-valuenow', String(Math.round(ghost ?? 0)));
+    profile.setAttribute('aria-valuetext', `${((ghost ?? 0) / 1000).toFixed(2)} km`);
+    if (layout.elev.on) D.drawElevationPlain(profile, ref, you, ghost, api.teamAt(), traces.get(ref));
     const c = clips[cur];
     const vidAt = c && c.ref === api.ref && view.ready ? c.distAtVideo(view.video.currentTime) : null;
     if (layout.map.on) {
@@ -529,7 +656,8 @@ export function initVideoScreen(api) {
       $('vMapInfo').textContent = vidAt == null ? '' :
         `video ${fmtMin(view.video.currentTime)} = ${(vidAt / 1000).toFixed(2)} km · you ${((you ?? 0) / 1000).toFixed(2)} km · ghost ${((ghost ?? 0) / 1000).toFixed(2)} km`;
     }
-    if (layout.scatter.on) D.drawScatter($('vScatter'), S.power, S.hr, S.power.length - 1, { avg: 10 });
+    if (layout.scatter.on) D.drawScatter($('vScatter'), riderPower, riderHr, riderPower.length - 1,
+      { avg: 10, comparison: { ghost: ghostScatter(ref, ghost) } });
     if (layout.trace.on) D.drawTrace($('vTrace'), S, { window: 600 });
   }
   new ResizeObserver(() => draw()).observe(screen);
@@ -544,9 +672,13 @@ export function initVideoScreen(api) {
     wake();
   }
   function leave() { view.video.pause(); document.body.classList.remove('chromeless'); }
-  function onNewRide() { choices = []; dismissed.clear(); showJunction(); }
+  function onNewRide() {
+    riderPower.length = riderHr.length = 0;
+    traces.clear(); trace = null;
+    choices = []; dismissed.clear(); showJunction();
+  }
 
   // tests
   window.__video = { get clips() { return clips; }, get cur() { return cur; }, get choices() { return choices; }, view, follower, startClip, takeTurn, refreshClips, openSync, net: () => net };
-  return { render, onTick, enter, leave, onNewRide };
+  return { render, onTick, enter, leave, onNewRide, recordRider, breakPowerTrace };
 }

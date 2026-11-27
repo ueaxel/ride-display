@@ -63,7 +63,9 @@ When you load a reference, the page also downloads the streets within about 500 
 - **Full screen:** ⛶ in the top bar or the **F** key. Press F or Esc to leave.
 - **Chapters:** the GoPro splits long recordings at 4 GB (GS01xxxx, GS02xxxx…). Export each chapter and pair them all with the same ride. They then play as one continuous video, in file-name order, and only one of them needs syncing.
 - **World Lock:** export with GoPro Player's *World Lock* **off**. World Lock keeps the picture facing the direction the camera had at the start, so on a bike ride the view drifts away from the road. *Horizon Leveling* can stay on. For a video already exported with World Lock on, press **Turn with road**. The app then turns the view by how much the route has turned since the start of the video. This is saved per clip.
-- **Panels:** drag them by the title and resize them at the bottom-right corner; × hides one, and **Panels** turns them on or off or resets the layout. They stay where you put them on the screen, whatever the video does.
+- **Panels:** drag a title to move its panel and use the bottom-right corner to resize it. **Panels** shows, hides, or resets the overlays. The **Opacity** slider at the top left adjusts all panel backgrounds and remembers your setting.
+- **Elevation & power:** the whole route shows elevation in grey, the reference ride’s recorded or estimated power in purple, and your measured power in white as you ride. Both power curves use the watt range printed at the bottom.
+- **Heart rate vs power:** purple dots follow the ghost and white dots follow you. Each dot pairs heart rate with 10-second average power, and older dots fade. Your dots appear when both sensor readings are available. Open **Panels** to enable the plot on a phone.
 - After 4 s of riding, the top bar and the panel handles hide; move the mouse to bring them back. ☰ → **Full screen** fills the whole display.
 
 **Junctions.** Where another clip runs along the same road as the one you're riding, the app looks ahead for where the two routes split. About 350 m before the split, it offers the choice: **1** stays on your clip, **2**, **3**… take the other clip (keys or click). Taking it switches to the other video at the same spot on the road, so the picture doesn't jump. At the end of a clip, if another clip carries on along the same road, the app continues on it automatically. So record the turns you want as separate rides (videos) that share the road before the junction.
@@ -146,11 +148,11 @@ The SpO2 tile (tablet) or the SpO2 number in the bottom line (phone) opens the *
 
 ## Fast forward
 
-The slider under the elevation profile (trainer and video screens) moves the ghost along the route; the team rides move with it, on the same clock, with their stops smoothed out. With **me too** ticked you go to the same spot (gap 0), so you can skip a part of the ride together; untick it to move only the ghost and the team. The distance shown is then where you are on the route, with the distance actually ridden beside it.
+On the video screen, drag or tap the **Elevation & power** profile to jump to that part of the ride. You can also focus the profile and use the arrow keys or Home and End. With **me too** checked, the video, your rider, and the ghost move together. Clear the box to move only the ghost and team during your ride. In the top left, **−15 s** and **+15 s** move the video and both riders together. The trainer screen uses the slider under its elevation profile.
 
 ## Play the original ride
 
-**▶** next to the fast-forward slider (trainer and video screens) plays the original ride by itself at normal speed, from where the ghost is: video, map position, elevation dot, numbers (the original's power, heart rate, speed) and the team. Stops are left out (moving time). No trainer control, and nothing is saved. **⏸** (or Pause) stops it; the slider jumps it; **Start** then begins your own ride from that spot.
+**▶** in the video screen's top-left controls or beside the trainer screen slider plays the original ride from the ghost's position. The video, map, elevation marker, and original rider's numbers follow the replay. Playback uses moving time and leaves the trainer idle. **⏸** pauses. **Start** begins your own ride from that spot.
 
 ## Ride library (Mac) and phone-size rides
 
