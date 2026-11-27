@@ -12,7 +12,7 @@ import { listOnline } from './online.js';
 
 const DEFAULT_LAYOUT = {
   numbers: { x: 0.012, y: 0.085, w: 0.44, h: 0.17, on: true },
-  elev: { x: 0.735, y: 0.395, w: 0.255, h: 0.115, on: true },
+  elev: { x: 0.735, y: 0.25, w: 0.255, h: 0.25, on: true },
   map: { x: 0.735, y: 0.52, w: 0.255, h: 0.46, on: true },
   scatter: { x: 0.012, y: 0.6, w: 0.27, h: 0.38, on: true },
   trace: { x: 0.30, y: 0.76, w: 0.42, h: 0.22, on: false },
@@ -22,8 +22,8 @@ const DEFAULT_LAYOUT = {
 // right, the plots off, so the video stays visible
 const PHONE_LAYOUT = {
   numbers: { x: 0.01, y: 0.12, w: 0.62, h: 0.36, on: true },
-  elev: { x: 0.65, y: 0.13, w: 0.34, h: 0.24, on: true },
-  map: { x: 0.65, y: 0.39, w: 0.34, h: 0.59, on: true },
+  elev: { x: 0.65, y: 0.13, w: 0.34, h: 0.365, on: true },
+  map: { x: 0.65, y: 0.52, w: 0.34, h: 0.46, on: true },
   scatter: { x: 0.01, y: 0.6, w: 0.3, h: 0.38, on: false },
   trace: { x: 0.30, y: 0.76, w: 0.42, h: 0.22, on: false },
 };
@@ -39,8 +39,17 @@ export function initVideoScreen(api) {
   const view = new VideoView($('vStage'));
   const follower = new VideoFollower(view);
   let clips = [], net = null, cur = -1, choices = [], dirHandle = null, syncing = false, mapWhole = false;
-  let layout = { ...(isPhone() ? PHONE_LAYOUT : DEFAULT_LAYOUT), ...store.get('videoLayout', {}) };
-  if (!store.get('videoLayout', {}).elev) layout.numbers = { ...layout.numbers, w: Math.max(layout.numbers.w, 0.44) };   // room for the new numbers
+  const savedLayout = store.get('videoLayout', {});
+  let layout = { ...(isPhone() ? PHONE_LAYOUT : DEFAULT_LAYOUT), ...savedLayout };
+  // Give the axes more room on layouts that still use the old default positions.
+  const old = savedLayout.elev;
+  if (old?.x === 0.735 && old.y === 0.395 && old.w === 0.255 && old.h === 0.115) {
+    layout.elev = { ...DEFAULT_LAYOUT.elev, on: old.on };
+  } else if (old?.x === 0.65 && old.y === 0.13 && old.w === 0.34 && old.h === 0.24) {
+    layout.elev = { ...PHONE_LAYOUT.elev, on: old.on };
+    const map = savedLayout.map;
+    if (map?.x === 0.65 && map.y === 0.39 && map.w === 0.34 && map.h === 0.59) layout.map = { ...PHONE_LAYOUT.map, on: map.on };
+  }
   const savedView = store.get('videoView', null);
   if (savedView) Object.assign(view, savedView);
   view.onViewChange = () => store.set('videoView', { yaw: view.yaw, pitch: view.pitch, fov: view.fov });
@@ -61,7 +70,7 @@ export function initVideoScreen(api) {
     const name = p.dataset.panel, head = p.querySelector('.fhead'), grip = p.querySelector('.grip');
     head.querySelector('.fclose').onclick = () => { layout[name] = { ...layout[name], on: false }; place(p); saveLayout(); fillPanelMenu(); };
     const drag = (el, resize) => el.addEventListener('pointerdown', e => {
-      if (e.target.closest('button')) return;
+      if (e.target.closest('button, #vProfileControls')) return;
       e.preventDefault(); el.setPointerCapture(e.pointerId);
       const W = screen.clientWidth, H = screen.clientHeight, L0 = { ...layout[name] }, x0 = e.clientX, y0 = e.clientY;
       const move = ev => {
@@ -182,10 +191,10 @@ export function initVideoScreen(api) {
 
   let scrubPointer = null;
   function scrub(event) {
-    const { left, width } = profile.getBoundingClientRect();
-    const pad = D.VIDEO_PROFILE_PADDING;
-    if (width <= 2 * pad) return;
-    const ratio = clamp((event.clientX - left - pad) / (width - 2 * pad), 1);
+    const { left, width, height } = profile.getBoundingClientRect();
+    const { L, R } = D.videoProfileBox(Math.round(width), Math.round(height));
+    if (R <= L) return;
+    const ratio = clamp((event.clientX - left - L) / (R - L), 1);
     seekRoute(ratio * api.ref.total, moveMe.checked);
   }
   profile.addEventListener('pointerdown', event => {
@@ -213,32 +222,151 @@ export function initVideoScreen(api) {
     } else seekRoute(event.key === 'Home' ? 0 : api.ref.total, moveMe.checked);
   });
 
-  const riderPower = [], riderHr = [], traces = new Map(), ghostSamples = new WeakMap();
-  let trace = null;
+  const riderPower = [], riderHr = [], riderGhost = [], traces = new Map(), refData = new WeakMap();
+  let trace = null, riderAverage = { seconds: 0, power: [], peak: 0 };
+  const average = $('vPowerAvg'), averageValue = $('vPowerAvgValue');
+  average.value = store.get('videoPowerAverageSeconds', 10);
+  let averageSeconds = +average.value;
+  function showAverage() {
+    averageValue.value = `${averageSeconds} s`;
+    average.setAttribute('aria-valuetext', `${averageSeconds} seconds`);
+  }
+  showAverage();
+  average.oninput = () => { averageSeconds = +average.value; showAverage(); draw(); };
+  average.onchange = () => store.set('videoPowerAverageSeconds', averageSeconds);
+
   function breakPowerTrace() {
     if (trace?.length && trace[trace.length - 1] !== null) trace.push(null);
   }
-  function recordRider(distance, watts, hr) {
+  function recordRider(distance, watts, hr, ghostTime) {
+    const index = riderPower.length, ref = api.ref;
     riderPower.push(watts);
     riderHr.push(hr);
-    const ref = api.ref;
+    riderGhost.push(ref ? { ref, time: ghostTime } : null);
     if (!ref) { breakPowerTrace(); trace = null; return; }
     if (!traces.has(ref)) traces.set(ref, []);
     const points = traces.get(ref);
     if (points !== trace) { breakPowerTrace(); trace = points; }
-    if (Number.isFinite(watts)) trace.push([Math.min(distance, ref.total), watts]);
+    if (Number.isFinite(watts)) trace.push([Math.min(distance, ref.total), index]);
     else breakPowerTrace();
   }
-  function ghostScatter(ref, distance) {
-    if (!ref?.hasPower || !ref.prof.hr || distance == null) return null;
-    if (!ghostSamples.has(ref)) ghostSamples.set(ref, { power: [], hr: [] });
-    const samples = ghostSamples.get(ref), now = Math.min(Math.floor(ref.totalTime), Math.floor(ref.timeAt(distance) + 1e-6));
-    for (let t = samples.power.length; t <= now; t++) {
-      const d = ref.distAtTime(t);
-      samples.power.push(ref.at('p', d));
-      samples.hr.push(ref.at('hr', d));
+  function averageData(power) {
+    const values = D.averageWatts(power, averageSeconds);
+    return { seconds: averageSeconds, power: values, peak: D.typicalPowerPeak(values) };
+  }
+  function referenceData(ref) {
+    if (!ref?.total) return null;
+    if (!refData.has(ref)) {
+      const distance = [], raw = [], hr = [];
+      for (let t = 0; t <= Math.ceil(ref.totalTime); t++) {
+        const d = ref.distAtTime(Math.min(t, ref.totalTime));
+        distance.push(d);
+        if (ref.hasPower) raw.push(ref.at('p', d));
+        if (ref.prof.hr) hr.push(ref.at('hr', d));
+      }
+      let low = Infinity, high = -Infinity;
+      for (const meters of ref.prof.a || []) {
+        const feet = meters / 0.3048;
+        low = Math.min(low, feet); high = Math.max(high, feet);
+      }
+      const bottom = Math.floor(low / 25) * 25;
+      const elevation = ref.hasAlt ? [bottom, Math.max(bottom + 50, Math.ceil(high / 25) * 25)] : null;
+      refData.set(ref, { distance, raw, hr, elevation });
     }
-    return { ...samples, now };
+    const data = refData.get(ref);
+    if (data.seconds !== averageSeconds) Object.assign(data, averageData(data.raw));
+    return data;
+  }
+  function sampleIndex(ref, time) {
+    if (time >= ref.totalTime) return Math.ceil(ref.totalTime);
+    return Math.max(0, Math.floor(time + 1e-6));
+  }
+  const TRACE_SECONDS = 600;
+  function videoTrace(ghost, now) {
+    if (!riderPower.length || api.S.replay) {
+      const end = now + 1, start = Math.max(0, end - TRACE_SECONDS);
+      return {
+        power: Array(end - start).fill(null), hr: [],
+        refPower: ghost?.power.slice(start, end) || [], refHr: ghost?.hr.slice(start, end) || [],
+      };
+    }
+    const start = Math.max(0, riderPower.length - TRACE_SECONDS);
+    const refPower = [], refHr = [];
+    for (let i = start; i < riderGhost.length; i++) {
+      const sample = riderGhost[i];
+      const data = referenceData(sample?.ref);
+      const t = data ? sampleIndex(sample.ref, sample.time) : 0;
+      refPower.push(data?.power[t] ?? null);
+      refHr.push(data?.hr[t] ?? null);
+    }
+    return { power: riderAverage.power.slice(start), hr: riderHr.slice(start), refPower, refHr };
+  }
+
+  const scaleHandles = [...screen.querySelectorAll('.vaxis')];
+  const profileGraph = profile.parentElement;
+  const scaleLimits = { elevation: [25, 60000], power: [100, 5000] };
+  let chartBox = null, chartScales = null, elevationZoom = null, powerZoom = null, zoomDrag = null;
+  function adjustScale(axis, range, fixLow, span) {
+    const [min, max] = scaleLimits[axis];
+    span = Math.max(min, Math.min(max, span));
+    if (axis === 'power') powerZoom = span;
+    else elevationZoom = { ref: api.ref, range: fixLow ? [range[0], range[0] + span] : [range[1] - span, range[1]] };
+    draw();
+  }
+  function resetScale(axis) {
+    if (axis === 'power') powerZoom = null;
+    else elevationZoom = null;
+    draw();
+  }
+  for (const handle of scaleHandles) {
+    const axis = handle.dataset.axis, mark = +handle.dataset.mark;
+    const fixLow = axis === 'power' || mark === 1000;
+    const [min, max] = scaleLimits[axis];
+    handle.setAttribute('aria-valuemin', min);
+    handle.setAttribute('aria-valuemax', max);
+    handle.addEventListener('pointerdown', event => {
+      if (zoomDrag || event.button !== 0 || !chartBox || syncing) return;
+      handle.focus({ preventScroll: true });
+      handle.setPointerCapture(event.pointerId);
+      zoomDrag = { handle, pointer: event.pointerId, y: event.clientY, range: chartScales[axis], height: chartBox.B - chartBox.T };
+    });
+    handle.addEventListener('pointermove', event => {
+      if (zoomDrag?.handle !== handle || zoomDrag.pointer !== event.pointerId) return;
+      const { y, range, height } = zoomDrag, dy = event.clientY - y;
+      const span = range[1] - range[0], delta = fixLow ? dy : -dy;
+      const fromFixedEdge = (fixLow ? mark - range[0] : range[1] - mark) * height / span;
+      // Use the plotted mark as the grip when it is visible. Edge grips still
+      // zoom smoothly when their numbered mark is outside the current range.
+      const nextSpan = fromFixedEdge > 2 && fromFixedEdge <= height
+        ? span * fromFixedEdge / Math.max(2, fromFixedEdge - delta)
+        : span * Math.exp(3 * delta / height);
+      adjustScale(axis, range, fixLow, nextSpan);
+    });
+    handle.addEventListener('lostpointercapture', event => {
+      if (zoomDrag?.pointer === event.pointerId) zoomDrag = null;
+    });
+    handle.addEventListener('dblclick', () => resetScale(axis));
+    handle.addEventListener('keydown', event => {
+      if (!['ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Home') { resetScale(axis); return; }
+      const range = chartScales?.[axis];
+      if (range) adjustScale(axis, range, fixLow, (range[1] - range[0]) * (event.key === 'ArrowUp' ? 0.8 : 1.25));
+    });
+  }
+  function placeScaleHandles() {
+    if (chartBox) profileGraph.style.setProperty('--v-axis-width', `${chartBox.L}px`);
+    for (const handle of scaleHandles) {
+      const axis = handle.dataset.axis, mark = chartBox?.marks[axis]?.[handle.dataset.mark];
+      handle.hidden = !mark;
+      if (!mark) continue;
+      const [lo, hi] = chartScales[axis];
+      handle.style.top = `${mark.y}px`;
+      handle.dataset.edge = mark.edge;
+      handle.setAttribute('aria-valuenow', Math.round(hi - lo));
+      handle.setAttribute('aria-valuetext', `${Math.round(lo)} to ${Math.round(hi)} ${axis === 'power' ? 'watts' : 'feet'}`);
+    }
   }
 
   // ---------------------------------------------------------------- clips
@@ -648,7 +776,26 @@ export function initVideoScreen(api) {
     profile.setAttribute('aria-valuemax', String(Math.round(ref?.total || 0)));
     profile.setAttribute('aria-valuenow', String(Math.round(ghost ?? 0)));
     profile.setAttribute('aria-valuetext', `${((ghost ?? 0) / 1000).toFixed(2)} km`);
-    if (layout.elev.on) D.drawElevationPlain(profile, ref, you, ghost, api.teamAt(), traces.get(ref));
+    if (layout.elev.on || layout.scatter.on || layout.trace.on) {
+      const data = referenceData(ref);
+      if (riderAverage.seconds !== averageSeconds || riderAverage.power.length !== riderPower.length) riderAverage = averageData(riderPower);
+      const now = data && ghost != null ? sampleIndex(ref, ref.timeAt(ghost)) : -1;
+      const autoWatts = Math.max(150, Math.ceil(Math.max(data?.peak ?? 0, riderAverage.peak) / 50) * 50);
+      const watts = powerZoom ?? Math.min(scaleLimits.power[1], autoWatts);
+      if (elevationZoom?.ref !== ref) elevationZoom = null;
+      const elevation = elevationZoom?.range ?? data?.elevation;
+      chartScales = { elevation, power: [0, watts] };
+      if (layout.elev.on) {
+        const rider = (traces.get(ref) || []).map(point => point && [point[0], riderAverage.power[point[1]]]);
+        chartBox = D.drawElevationPlain(profile, ref, {
+          you, ghost, team: api.teamAt(), rider, reference: data?.power.length ? data : null, elevation, watts,
+        });
+        placeScaleHandles();
+      }
+      if (layout.scatter.on) D.drawScatter($('vScatter'), riderAverage.power, riderHr, riderPower.length - 1,
+        { avg: averageSeconds, comparison: { ghost: data ? { power: data.power, hr: data.hr, now } : null, maxWatts: watts } });
+      if (layout.trace.on) D.drawTrace($('vTrace'), videoTrace(data, now), { window: TRACE_SECONDS, maxWatts: watts });
+    }
     const c = clips[cur];
     const vidAt = c && c.ref === api.ref && view.ready ? c.distAtVideo(view.video.currentTime) : null;
     if (layout.map.on) {
@@ -656,11 +803,10 @@ export function initVideoScreen(api) {
       $('vMapInfo').textContent = vidAt == null ? '' :
         `video ${fmtMin(view.video.currentTime)} = ${(vidAt / 1000).toFixed(2)} km · you ${((you ?? 0) / 1000).toFixed(2)} km · ghost ${((ghost ?? 0) / 1000).toFixed(2)} km`;
     }
-    if (layout.scatter.on) D.drawScatter($('vScatter'), riderPower, riderHr, riderPower.length - 1,
-      { avg: 10, comparison: { ghost: ghostScatter(ref, ghost) } });
-    if (layout.trace.on) D.drawTrace($('vTrace'), S, { window: 600 });
   }
-  new ResizeObserver(() => draw()).observe(screen);
+  const resize = new ResizeObserver(() => draw());
+  resize.observe(screen);
+  resize.observe(profile);
   setInterval(() => { if (document.body.dataset.mode === 'video' && !view.video.paused) draw(); }, 400);
 
   async function enter() {
@@ -673,7 +819,8 @@ export function initVideoScreen(api) {
   }
   function leave() { view.video.pause(); document.body.classList.remove('chromeless'); }
   function onNewRide() {
-    riderPower.length = riderHr.length = 0;
+    riderPower.length = riderHr.length = riderGhost.length = 0;
+    riderAverage = { seconds: 0, power: [], peak: 0 };
     traces.clear(); trace = null;
     choices = []; dismissed.clear(); showJunction();
   }

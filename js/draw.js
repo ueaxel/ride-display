@@ -269,65 +269,118 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
   }
 }
 
-export const VIDEO_PROFILE_PADDING = 6;
+const FEET_PER_METER = 1 / 0.3048;
+
+export function videoProfileBox(width, height) {
+  const gutter = Math.min(42, Math.floor(width / 3));
+  return { L: gutter, R: width - gutter, T: 14, B: height - 15 };
+}
+
+export function averageWatts(power, seconds) {
+  let start = 0, sum = 0;
+  return power.map((watts, i) => {
+    if (!Number.isFinite(watts)) { start = i + 1; sum = 0; return null; }
+    sum += watts;
+    if (i - start >= seconds) sum -= power[start++];
+    return sum / (i - start + 1);
+  });
+}
+
+export function typicalPowerPeak(power) {
+  const watts = power.filter(Number.isFinite).sort((a, b) => a - b);
+  // Keep extreme readings in the plots, while leaving them out of auto-ranging.
+  return watts[Math.floor((watts.length - 1) * 0.98)] ?? 0;
+}
+
+function tickStep(span, divisions) {
+  const target = span / divisions, magnitude = 10 ** Math.floor(Math.log10(target));
+  const unit = target / magnitude;
+  return magnitude * (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10);
+}
 
 // Whole-ride elevation and power share a route-distance axis.
-export function drawElevationPlain(canvas, ref, you = null, ghost = null, team = [], rider = []) {
-  const ctx = fit(canvas);
-  if (!ref?.total) return;
+export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, reference, elevation, watts }) {
+  const ctx = fit(canvas), { L, R, T, B } = videoProfileBox(ctx.w, ctx.h);
+  if (!ref?.total || R <= L || B - T < 22) return null;
   const P = ref.prof, n = ref.n;
-  const L = VIDEO_PROFILE_PADDING, R = ctx.w - L, T = 8, B = ctx.h - 14;
-  if (R <= L || B <= T) return;
   const X = d => L + (R - L) * Math.max(0, Math.min(ref.total, d)) / ref.total;
-  const step = Math.max(1, Math.floor(n / (R - L)));
-  let a0 = Infinity, a1 = -Infinity;
-  for (const a of P.a || []) { a0 = Math.min(a0, a); a1 = Math.max(a1, a); }
-  a1 = Math.max(a1, a0 + 20);
-  const Y = a => B - (B - T) * (a - a0) / (a1 - a0);
-  if (ref.hasAlt) {
+  const project = ([lo, hi]) => value => B - (B - T) * (value - lo) / (hi - lo);
+  const altY = elevation ? project(elevation) : () => B;
+  const wattsY = project([0, watts]);
+  const mark = (value, y) => ({
+    y: Math.max(T + 3, Math.min(B - 3, y(value))),
+    edge: y(value) < T ? 'above' : y(value) > B ? 'below' : '',
+  });
+  const marks = {
+    elevation: elevation ? { 100: mark(100, altY), 1000: mark(1000, altY) } : null,
+    power: reference || rider.length ? { 100: mark(100, wattsY) } : null,
+  };
+  if (marks.elevation && marks.elevation[100].y - marks.elevation[1000].y < 17) {
+    const center = (marks.elevation[100].y + marks.elevation[1000].y) / 2;
+    const mid = Math.max(T + 11.5, Math.min(B - 11.5, center));
+    marks.elevation[100].y = mid + 8.5;
+    marks.elevation[1000].y = mid - 8.5;
+  }
+  function axis(range, y, x, rulerMarks, label, left) {
+    const [lo, hi] = range, sign = left ? -1 : 1;
+    ctx.font = '10px system-ui'; ctx.fillStyle = '#C9D1DC'; ctx.textAlign = left ? 'left' : 'right';
+    ctx.fillText(label, left ? 1 : ctx.w - 1, 10);
+    ctx.strokeStyle = '#818995'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, B); ctx.stroke();
+    ctx.font = '9px system-ui'; ctx.textAlign = left ? 'right' : 'left';
+    const step = tickStep(hi - lo, Math.max(2, (B - T) / 22));
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-6; v += step) {
+      const at = y(v);
+      ctx.beginPath(); ctx.moveTo(x, at); ctx.lineTo(x + sign * 3, at); ctx.stroke();
+      if (Object.values(rulerMarks).every(m => Math.abs(m.y - at) >= 10))
+        ctx.fillText(Math.round(v), x + sign * 6, at + 3);
+    }
+  }
+  if (elevation) axis(elevation, altY, L, marks.elevation, 'Elevation (ft)', true);
+  if (marks.power) axis([0, watts], wattsY, R, marks.power, `Power (W) · 0–${Math.round(watts)}`, false);
+
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T, R - L, B - T); ctx.clip();
+  if (elevation) {
+    const step = Math.max(1, Math.floor(n / (R - L)));
     ctx.beginPath(); ctx.moveTo(X(0), B);
-    for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), Y(P.a[i]));
-    ctx.lineTo(X(ref.total), Y(P.a[n - 1])); ctx.lineTo(X(ref.total), B); ctx.closePath();
+    for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), altY(P.a[i] * FEET_PER_METER));
+    ctx.lineTo(X(ref.total), altY(P.a[n - 1] * FEET_PER_METER)); ctx.lineTo(X(ref.total), B); ctx.closePath();
     ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
     ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
   }
 
-  let peak = 0;
-  for (const watts of P.p || []) peak = Math.max(peak, watts);
-  for (const point of rider) if (point) peak = Math.max(peak, point[1]);
-  const maxW = Math.max(100, Math.ceil(peak / 50) * 50);
-  const wattsY = p => B - (B - T) * p / maxW;
-  if (ref.hasPower) {
+  if (reference) {
+    const { distance, power } = reference;
+    const step = Math.max(1, Math.floor(power.length / (2 * (R - L))));
     ctx.strokeStyle = C.ghost; ctx.lineWidth = 1.5; ctx.beginPath();
-    ctx.moveTo(X(P.d[0]), wattsY(P.p[0]));
-    for (let i = step; i < n; i += step) ctx.lineTo(X(P.d[i]), wattsY(P.p[i]));
-    ctx.lineTo(X(ref.total), wattsY(P.p[n - 1])); ctx.stroke();
+    ctx.moveTo(X(distance[0]), wattsY(power[0]));
+    for (let i = step; i < power.length; i += step) ctx.lineTo(X(distance[i]), wattsY(power[i]));
+    ctx.lineTo(X(ref.total), wattsY(power[power.length - 1])); ctx.stroke();
   }
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath();
   let connected = false, latest = null;
   for (const point of rider) {
     if (!point) { connected = false; continue; }
-    const [d, watts] = point;
-    if (connected) ctx.lineTo(X(d), wattsY(watts));
-    else ctx.moveTo(X(d), wattsY(watts));
+    const [d, power] = point;
+    if (connected) ctx.lineTo(X(d), wattsY(power));
+    else ctx.moveTo(X(d), wattsY(power));
     connected = true; latest = point;
   }
   ctx.stroke();
   if (latest) dot(ctx, X(latest[0]), wattsY(latest[1]), 2, '#fff');
+  ctx.restore();
 
-  ctx.fillStyle = '#C9D1DC'; ctx.font = '11px system-ui'; ctx.textAlign = 'left';
-  ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
-  if (ref.hasAlt) ctx.fillText(`${Math.round(a0)}–${Math.round(a1)} m`, L, ctx.h - 2);
-  if (ref.hasPower || latest) {
-    ctx.textAlign = 'center'; ctx.fillText(`0–${maxW} W`, (L + R) / 2, ctx.h - 2);
-  }
+  ctx.fillStyle = '#C9D1DC'; ctx.font = '10px system-ui';
+  ctx.textAlign = 'left'; ctx.fillText('0 km', L, ctx.h - 2);
   ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, R, ctx.h - 2);
-  ctx.shadowBlur = 0;
-
-  const at = d => [X(d), ref.hasAlt ? Y(ref.at('a', d)) : B];
-  for (const m of team) { const [x, y] = at(m.d); dot(ctx, x, y, 5, m.color); }
-  if (ghost != null) { const [x, y] = at(ghost); dot(ctx, x, y, 5, C.ghost); }
-  if (you != null) { const [x, y] = at(you); dot(ctx, x, y, 3, '#fff'); }
+  function riderPosition(d, radius, color) {
+    const y = Math.max(T, Math.min(B, altY(ref.at('a', d) * FEET_PER_METER)));
+    dot(ctx, X(d), y, radius, color);
+  }
+  for (const m of team) riderPosition(m.d, 5, m.color);
+  if (ghost != null) riderPosition(ghost, 5, C.ghost);
+  if (you != null) riderPosition(you, 3, '#fff');
+  return { L, R, T, B, marks };
 }
 
 // Elevation profile with you and the ghost.
@@ -372,10 +425,10 @@ function axes(ctx, box, xr, yr, xlab, ylab) {
 function gridAxes(ctx, box, xr, xs, yr, ys, xlab, ylab) {
   const { L, R, T, B } = box;
   ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.fillStyle = C.muted; ctx.font = '12px system-ui';
-  const nx = Math.round((xr[1] - xr[0]) / xs), ny = Math.round((yr[1] - yr[0]) / ys);
+  const nx = Math.floor((xr[1] - xr[0]) / xs + 1e-6), ny = Math.round((yr[1] - yr[0]) / ys);
   const xEvery = Math.max(1, Math.ceil(nx / Math.max(2, (R - L) / 45))), yEvery = Math.max(1, Math.ceil(ny / Math.max(2, (B - T) / 18)));
   for (let j = 0; j <= nx; j++) {
-    const v = xr[0] + j * xs, x = L + (R - L) * j / nx;
+    const v = xr[0] + j * xs, x = L + (R - L) * j * xs / (xr[1] - xr[0]);
     ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, B); ctx.stroke();
     if (j % xEvery === 0) { ctx.textAlign = 'center'; ctx.fillText(Math.round(v), x, B + 15); }
   }
@@ -395,11 +448,14 @@ export function drawScatter(canvas, power, hr, now, { avg = 10, comparison = nul
   const ctx = fit(canvas);
   function points(power, hr, now) {
     const pts = [];
-    let sum = 0, count = 0;
+    let sum = 0;
     for (let i = 0; i < power.length && i <= now; i++) {
-      if (Number.isFinite(power[i])) { sum += power[i]; count++; }
-      if (i >= avg && Number.isFinite(power[i - avg])) { sum -= power[i - avg]; count--; }
-      if (hr[i] > 0 && i >= avg - 1 && (!comparison || count === avg)) pts.push([sum / avg, hr[i], now - i]);
+      if (!comparison) {
+        sum += power[i] ?? 0;
+        if (i >= avg) sum -= power[i - avg] ?? 0;
+      }
+      const watts = comparison ? power[i] : i >= avg - 1 ? sum / avg : null;
+      if (hr[i] > 0 && Number.isFinite(watts)) pts.push([watts, hr[i], now - i]);
     }
     return pts;
   }
@@ -412,10 +468,12 @@ export function drawScatter(canvas, power, hr, now, { avg = 10, comparison = nul
   for (const series of [you, theirs]) {
     for (const [p, h] of series) { p1 = Math.max(p1, p); h0 = Math.min(h0, h); h1 = Math.max(h1, h); }
   }
-  const xr = nice(0, p1 * 1.05, 50), yr = nice(h0 - 3, h1 + 3, 20);
+  const xr = comparison ? [0, comparison.maxWatts] : nice(0, p1 * 1.05, 50);
+  const yr = nice(h0 - 3, h1 + 3, 20), xs = comparison ? tickStep(xr[1], 6) : 50;
   const box = { L: 46, R: ctx.w - 12, T: comparison ? 22 : 10, B: ctx.h - 38 };
   if (box.R <= box.L || box.B <= box.T) return;
-  gridAxes(ctx, box, xr, 50, yr, 20, `Power, ${avg}-s average (W)`, 'Heart rate (bpm)');
+  const powerLabel = comparison ? `Power, ${avg} s avg (0–${Math.round(xr[1])} W)` : `Power, ${avg}-s average (W)`;
+  gridAxes(ctx, box, xr, xs, yr, 20, powerLabel, 'Heart rate (bpm)');
   const X = p => box.L + (box.R - box.L) * (p - xr[0]) / (xr[1] - xr[0]);
   const Y = h => box.B - (box.B - box.T) * (h - yr[0]) / (yr[1] - yr[0]);
   const paint = (series, color, radius) => {
@@ -428,8 +486,12 @@ export function drawScatter(canvas, power, hr, now, { avg = 10, comparison = nul
     const latest = series[series.length - 1];
     if (latest && (!comparison || latest[2] === 0)) dot(ctx, X(latest[0]), Y(latest[1]), radius, color);
   };
+  if (comparison) {
+    ctx.save(); ctx.beginPath(); ctx.rect(box.L, box.T - 5, box.R - box.L + 4, box.B - box.T + 10); ctx.clip();
+  }
   paint(theirs, C.ghost, 7);
   paint(you, comparison ? '#fff' : C.accent, comparison ? 4 : 6);
+  if (comparison) ctx.restore();
   if (comparison) {
     ctx.font = '11px system-ui'; ctx.textAlign = 'left';
     ctx.fillStyle = C.ghost; ctx.fillText('Ghost', box.L, 12);
@@ -437,20 +499,25 @@ export function drawScatter(canvas, power, hr, now, { avg = 10, comparison = nul
   }
 }
 
-// Power and HR over time (yours solid, the reference ride's dashed purple).
-export function drawTrace(canvas, S, { window = 600 } = {}) {
+// Power and HR over time. Your lines are solid and the ghost's are dashed.
+const VIDEO_TRACE_COLORS = { ghostPower: '#E8B8FF', ghostHr: '#B478E9', power: '#EFF1F4', hr: '#A2A9B4' };
+export function drawTrace(canvas, S, { window = 600, maxWatts = null } = {}) {
   const ctx = fit(canvas);
   const n = S.power.length;
   if (n < 3) return message(ctx, 'Power and heart rate over time');
-  const i0 = window ? Math.max(0, n - window) : 0, span = Math.max(60, (window || n) - 1);
-  const box = { L: 46, R: ctx.w - 46, T: 10, B: ctx.h - 24 };
+  const i0 = window ? Math.max(0, n - window) : 0, video = maxWatts != null;
+  const span = Math.max(60, (video ? n - i0 : window || n) - 1);
+  const colors = video ? VIDEO_TRACE_COLORS : { ghostPower: C.ghost, ghostHr: '#B07CC0', power: C.power, hr: C.hr };
+  const margin = video ? 39 : 46;
+  const box = { L: margin, R: ctx.w - margin, T: video ? 24 : 10, B: ctx.h - 24 };
+  if (box.R <= box.L || box.B <= box.T) return;
   let pMax = 100, h0 = 250, h1 = 0;
   for (let i = i0; i < n; i++) {
     pMax = Math.max(pMax, S.power[i] ?? 0, S.refPower[i] ?? 0);
     for (const h of [S.hr[i], S.refHr[i]]) if (h > 0) { h0 = Math.min(h0, h); h1 = Math.max(h1, h); }
   }
   if (h1 === 0) { h0 = 60; h1 = 180; }
-  const pr = nice(0, pMax * 1.05, 50), hrR = nice(h0 - 3, h1 + 3, 10);
+  const pr = video ? [0, maxWatts] : nice(0, pMax * 1.05, 50), hrR = nice(h0 - 3, h1 + 3, 10);
   const X = i => box.L + (box.R - box.L) * (i - i0) / span;
   const YP = p => box.B - (box.B - box.T) * p / pr[1];
   const YH = h => box.B - (box.B - box.T) * (h - hrR[0]) / (hrR[1] - hrR[0]);
@@ -458,11 +525,20 @@ export function drawTrace(canvas, S, { window = 600 } = {}) {
   for (let j = 0; j <= 4; j++) {
     const y = box.B - (box.B - box.T) * j / 4;
     ctx.beginPath(); ctx.moveTo(box.L, y); ctx.lineTo(box.R, y); ctx.stroke();
-    ctx.fillStyle = C.power; ctx.textAlign = 'right'; ctx.fillText(Math.round(pr[1] * j / 4), box.L - 6, y + 4);
-    ctx.fillStyle = C.hr; ctx.textAlign = 'left'; ctx.fillText(Math.round(hrR[0] + (hrR[1] - hrR[0]) * j / 4), box.R + 6, y + 4);
+    ctx.fillStyle = colors.power; ctx.textAlign = 'right'; ctx.fillText(Math.round(pr[1] * j / 4), box.L - 6, y + 4);
+    ctx.fillStyle = colors.hr; ctx.textAlign = 'left'; ctx.fillText(Math.round(hrR[0] + (hrR[1] - hrR[0]) * j / 4), box.R + 6, y + 4);
   }
   ctx.fillStyle = C.muted; ctx.textAlign = 'center';
-  ctx.fillText(window ? `last ${Math.round(window / 60)} min` : 'whole ride', (box.L + box.R) / 2, ctx.h - 6);
+  const timeLabel = video ? `last ${Math.ceil(span / 60)} min` : window ? `last ${Math.round(window / 60)} min` : 'whole ride';
+  ctx.fillText(timeLabel, (box.L + box.R) / 2, ctx.h - 6);
+  if (video) {
+    const legend = [['Ghost W', colors.ghostPower], ['Ghost bpm', colors.ghostHr], ['You W', colors.power], ['You bpm', colors.hr]];
+    ctx.font = '10px system-ui';
+    legend.forEach(([label, color], i) => {
+      ctx.fillStyle = color; ctx.fillText(label, ctx.w * (i + 0.5) / legend.length, 11);
+    });
+    ctx.save(); ctx.beginPath(); ctx.rect(box.L, box.T - 1, box.R - box.L, box.B - box.T + 2); ctx.clip();
+  }
   const line = (arr, Yf, col, w, dash = []) => {
     ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash); ctx.beginPath();
     let on = false;
@@ -474,10 +550,11 @@ export function drawTrace(canvas, S, { window = 600 } = {}) {
     }
     ctx.stroke(); ctx.setLineDash([]);
   };
-  line(S.refPower, YP, C.ghost, 1.5, [6, 4]);
-  line(S.refHr, YH, '#B07CC0', 1.5, [2, 4]);
-  line(S.power, YP, C.power, 2);
-  line(S.hr, YH, C.hr, 2.5);
+  line(S.refPower, YP, colors.ghostPower, 1.5, [6, 4]);
+  line(S.refHr, YH, colors.ghostHr, 1.5, [2, 4]);
+  line(S.power, YP, colors.power, 2);
+  line(S.hr, YH, colors.hr, 2.5);
+  if (video) ctx.restore();
 }
 
 // The latest step: HR data with the fitted response curve.

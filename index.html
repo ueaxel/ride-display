@@ -136,7 +136,48 @@
   #vPlayback button { min-height:30px; padding:3px 8px; font-size:12px; }
   #vPlayback button:disabled { opacity:.45; cursor:default; }
   #vPlayback label { display:flex; align-items:center; gap:4px; white-space:nowrap; }
-  #vOpacity { width:58px; margin:0; accent-color:var(--ghost); }
+  .float[data-panel=elev] { min-height:116px; container-type:inline-size; }
+  .float[data-panel=elev] .fhead { gap:5px; padding-left:8px; padding-right:5px; }
+  .float[data-panel=elev] .fhead > span { font-size:10px; letter-spacing:.025em; line-height:1.15; text-shadow:0 1px 2px #000; }
+  .float[data-panel=elev] .fhead .fclose { margin-left:0; }
+  body.chromeless .float[data-panel=elev] .fhead { opacity:1; }
+  #vProfileControls { display:flex; flex:none; align-items:center; gap:3px; margin-left:auto; cursor:default; }
+  #vProfileControls button { padding:2px 5px; min-height:24px; white-space:nowrap; }
+  #vProfileControls button:disabled { opacity:.45; }
+  #vProfileControls label { display:flex; align-items:center; gap:3px; text-transform:none; letter-spacing:0; cursor:default; }
+  #vOpacity, #vPowerAvg { margin:0; accent-color:var(--ghost); cursor:pointer; }
+  #vOpacity { width:42px; }
+  .vprofilebody { display:flex; flex-direction:column; gap:2px; padding-bottom:5px; }
+  .vprofilegraph { flex:1; min-height:0; position:relative; }
+  .vaxis { position:absolute; width:calc(var(--v-axis-width, 40px) + 4px); transform:translateY(-50%); min-height:16px;
+    display:flex; align-items:center; justify-content:flex-start; gap:3px; padding:0; border:0; border-radius:3px;
+    background:none; color:#e4e8ef; font-size:9px; font-variant-numeric:tabular-nums; text-shadow:0 1px 2px #000;
+    cursor:ns-resize; touch-action:none; }
+  .vaxis[hidden] { display:none; }
+  .vaxis[data-axis=elevation] { left:0; flex-direction:row-reverse; }
+  .vaxis[data-axis=power] { right:0; color:var(--ghost); }
+  .vaxis::before { content:''; box-sizing:border-box; width:8px; height:8px; flex:none; border:1px solid #0b0f14; border-radius:50%; background:currentColor; }
+  .vaxis[data-edge=above] span::after { content:' ↑'; }
+  .vaxis[data-edge=below] span::after { content:' ↓'; }
+  .vaxis:focus-visible { outline:1px solid currentColor; }
+  .vavg { display:flex; flex:none; align-items:center; gap:4px; align-self:flex-end; padding-right:10px;
+    color:#d9dfe9; font-size:10px; white-space:nowrap; }
+  #vPowerAvg { width:64px; min-width:0; }
+  #vPowerAvgValue { min-width:2.5em; text-align:right; font-variant-numeric:tabular-nums; }
+  @container (max-width: 265px) {
+    #vProfileControls label { font-size:9px; }
+    #vOpacity { width:34px; }
+  }
+  @container (max-width: 210px) {
+    #vProfileControls label span { display:none; }
+  }
+  @container (max-width: 185px) {
+    .float[data-panel=elev] .fhead { padding-left:4px; gap:3px; }
+    .float[data-panel=elev] .fhead > span { font-size:9px; }
+    #vProfileControls button { padding-inline:2px; font-size:9px; }
+    #vOpacity { width:28px; }
+    #vPowerAvg { width:48px; }
+  }
   #vElev { display:block; width:100%; height:100%; touch-action:pan-y; }
   #vElev[aria-disabled=false] { cursor:ew-resize; }
   #vElev:focus-visible { outline:2px solid var(--ghost); outline-offset:-2px; }
@@ -331,11 +372,8 @@
   <div id="vStage"></div>
   <div class="vmsg" id="vMsg"></div>
   <div id="vPlayback" role="group" aria-label="Ride playback">
-    <button id="vBack15" disabled aria-label="Back 15 seconds">−15 s</button>
     <button id="vPlay" class="ffplay" disabled aria-label="Play the original ride">▶</button>
-    <button id="vForward15" disabled aria-label="Forward 15 seconds">+15 s</button>
     <label title="Move the video and your rider when scrubbing the profile"><input type="checkbox" id="vMoveMe" checked> me too</label>
-    <label>Opacity <input type="range" id="vOpacity" min="0" max="100" value="58" aria-label="Overlay background opacity"></label>
   </div>
   <section class="float" data-panel="numbers"><div class="fhead">Ride<button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><div class="vnums">
@@ -349,9 +387,24 @@
       <div><div class="label">Distance</div><div class="v" id="vDist">0.00</div><div class="s">km</div></div>
       <div><div class="label">Gap to ghost</div><div class="v" id="vGap">–</div><div class="s" id="vGapS"></div></div>
     </div></div><div class="grip"></div></section>
-  <section class="float" data-panel="elev"><div class="fhead">Elevation &amp; power<button class="fclose" title="Hide">×</button></div>
-    <div class="fbody"><canvas id="vElev" role="slider" tabindex="0" aria-label="Ride position"
-      aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag along the profile to seek"></canvas></div><div class="grip"></div></section>
+  <section class="float" data-panel="elev">
+    <div class="fhead"><span>Elevation &amp; Power</span>
+      <div id="vProfileControls" role="group" aria-label="Elevation and power controls">
+        <button id="vBack15" disabled aria-label="Back 15 seconds">−15 s</button>
+        <button id="vForward15" disabled aria-label="Forward 15 seconds">+15 s</button>
+        <label title="Overlay background opacity"><span>Opacity</span><input type="range" id="vOpacity" min="0" max="100" value="58" aria-label="Overlay background opacity"></label>
+      </div><button class="fclose" title="Hide">×</button>
+    </div>
+    <div class="fbody vprofilebody">
+      <div class="vprofilegraph"><canvas id="vElev" role="slider" tabindex="0" aria-label="Ride position"
+        aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag along the profile to seek"></canvas>
+        <button class="vaxis" data-axis="elevation" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 100 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>100</span></button>
+        <button class="vaxis" data-axis="elevation" data-mark="1000" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 1,000 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>1,000</span></button>
+        <button class="vaxis" data-axis="power" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Power scale at 100 watts" title="Drag up or down to change the power scale in both plots. Double-click to reset." hidden><span>100</span></button>
+      </div>
+      <label class="vavg" for="vPowerAvg">Power avg <input type="range" id="vPowerAvg" min="1" max="60" value="10" aria-label="Power averaging time in seconds"> <output id="vPowerAvgValue" for="vPowerAvg">10 s</output></label>
+    </div><div class="grip"></div>
+  </section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>
     <div class="fbody"><canvas id="vMap"></canvas><div id="vMapInfo" class="mapinfo"></div></div><div class="grip"></div></section>
   <section class="float" data-panel="scatter"><div class="fhead">Heart rate vs power<button class="fclose" title="Hide">×</button></div>
