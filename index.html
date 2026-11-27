@@ -133,16 +133,15 @@
   #vPlayback { position:absolute; z-index:13; left:max(8px, env(safe-area-inset-left)); top:calc(var(--v-header-height, 48px) + 6px);
     display:flex; flex-wrap:wrap; align-items:center; gap:5px; max-width:calc(100% - 16px); padding:4px 6px;
     color:#f2f5f8; background:rgba(11,15,20,.8); border-radius:10px; font-size:11px; }
-  #vPlayback button { min-height:30px; padding:3px 8px; font-size:12px; }
-  #vPlayback button:disabled { opacity:.45; cursor:default; }
   #vPlayback label { display:flex; align-items:center; gap:4px; white-space:nowrap; }
-  .float[data-panel=elev] { min-height:116px; container-type:inline-size; }
+  .float[data-panel=elev] { min-height:124px; container-type:inline-size; }
   .float[data-panel=elev] .fhead { gap:5px; padding-left:8px; padding-right:5px; }
   .float[data-panel=elev] .fhead > span { font-size:10px; letter-spacing:.025em; line-height:1.15; text-shadow:0 1px 2px #000; }
   .float[data-panel=elev] .fhead .fclose { margin-left:0; }
   body.chromeless .float[data-panel=elev] .fhead { opacity:1; }
   #vProfileControls { display:flex; flex:none; align-items:center; gap:3px; margin-left:auto; cursor:default; }
   #vProfileControls button { padding:2px 5px; min-height:24px; white-space:nowrap; }
+  #vProfileControls #vPlay { width:23px; padding-inline:0; }
   #vProfileControls button:disabled { opacity:.45; }
   #vProfileControls label { display:flex; align-items:center; gap:3px; text-transform:none; letter-spacing:0; cursor:default; }
   #vOpacity, #vPowerAvg { margin:0; accent-color:var(--ghost); cursor:pointer; }
@@ -168,7 +167,7 @@
     #vProfileControls label { font-size:9px; }
     #vOpacity { width:34px; }
   }
-  @container (max-width: 210px) {
+  @container (max-width: 245px) {
     #vProfileControls label span { display:none; }
   }
   @container (max-width: 185px) {
@@ -371,8 +370,7 @@
 <main id="videoScreen">
   <div id="vStage"></div>
   <div class="vmsg" id="vMsg"></div>
-  <div id="vPlayback" role="group" aria-label="Ride playback">
-    <button id="vPlay" class="ffplay" disabled aria-label="Play the original ride">▶</button>
+  <div id="vPlayback" role="group" aria-label="Profile scrubbing">
     <label title="Move the video and your rider when scrubbing the profile"><input type="checkbox" id="vMoveMe" checked> me too</label>
   </div>
   <section class="float" data-panel="numbers"><div class="fhead">Ride<button class="fclose" title="Hide">×</button></div>
@@ -391,13 +389,14 @@
     <div class="fhead"><span>Elevation &amp; Power</span>
       <div id="vProfileControls" role="group" aria-label="Elevation and power controls">
         <button id="vBack15" disabled aria-label="Back 15 seconds">−15 s</button>
+        <button id="vPlay" class="ffplay" disabled aria-label="Play the original ride">▶</button>
         <button id="vForward15" disabled aria-label="Forward 15 seconds">+15 s</button>
         <label title="Overlay background opacity"><span>Opacity</span><input type="range" id="vOpacity" min="0" max="100" value="58" aria-label="Overlay background opacity"></label>
       </div><button class="fclose" title="Hide">×</button>
     </div>
     <div class="fbody vprofilebody">
       <div class="vprofilegraph"><canvas id="vElev" role="slider" tabindex="0" aria-label="Ride position"
-        aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag along the profile to seek"></canvas>
+        aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag to seek. Scroll up or down to zoom the distance axis."></canvas>
         <button class="vaxis" data-axis="elevation" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 100 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>100</span></button>
         <button class="vaxis" data-axis="elevation" data-mark="1000" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 1,000 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>1,000</span></button>
         <button class="vaxis" data-axis="power" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Power scale at 100 watts" title="Drag up or down to change the power scale in both plots. Double-click to reset." hidden><span>100</span></button>

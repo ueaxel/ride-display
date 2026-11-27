@@ -272,8 +272,8 @@ export function drawRoute(canvas, ref, { you = null, ghost = null, view = 'all',
 const FEET_PER_METER = 1 / 0.3048;
 
 export function videoProfileBox(width, height) {
-  const gutter = Math.min(42, Math.floor(width / 3));
-  return { L: gutter, R: width - gutter, T: 14, B: height - 15 };
+  const gutter = Math.min(42, Math.max(24, Math.round(width * 0.19)));
+  return { L: gutter, R: width - gutter, T: 14, B: height - 27 };
 }
 
 export function averageWatts(power, seconds) {
@@ -299,11 +299,11 @@ function tickStep(span, divisions) {
 }
 
 // Whole-ride elevation and power share a route-distance axis.
-export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, reference, elevation, watts }) {
+export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, reference, elevation, watts, distanceRange, fmtTime }) {
   const ctx = fit(canvas), { L, R, T, B } = videoProfileBox(ctx.w, ctx.h);
   if (!ref?.total || R <= L || B - T < 22) return null;
-  const P = ref.prof, n = ref.n;
-  const X = d => L + (R - L) * Math.max(0, Math.min(ref.total, d)) / ref.total;
+  const [start, end] = distanceRange, span = end - start;
+  const X = d => L + (R - L) * (d - start) / span;
   const project = ([lo, hi]) => value => B - (B - T) * (value - lo) / (hi - lo);
   const altY = elevation ? project(elevation) : () => B;
   const wattsY = project([0, watts]);
@@ -339,23 +339,35 @@ export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, refer
   if (elevation) axis(elevation, altY, L, marks.elevation, 'Elevation (ft)', true);
   if (marks.power) axis([0, watts], wattsY, R, marks.power, `Power (W) · 0–${Math.round(watts)}`, false);
 
+  function firstSampleAt(distances, d) {
+    let lo = 0, hi = distances.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (distances[mid] < d) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  function visibleLine(distances, values, y) {
+    const first = firstSampleAt(distances, start), last = firstSampleAt(distances, end);
+    const step = Math.max(1, Math.floor((last - first) / (2 * (R - L))));
+    ctx.lineTo(L, y(interp(distances, values, start)));
+    for (let i = first; i < last; i += step) ctx.lineTo(X(distances[i]), y(values[i]));
+    ctx.lineTo(R, y(interp(distances, values, end)));
+  }
+
   ctx.save(); ctx.beginPath(); ctx.rect(L, T, R - L, B - T); ctx.clip();
   if (elevation) {
-    const step = Math.max(1, Math.floor(n / (R - L)));
-    ctx.beginPath(); ctx.moveTo(X(0), B);
-    for (let i = 0; i < n; i += step) ctx.lineTo(X(P.d[i]), altY(P.a[i] * FEET_PER_METER));
-    ctx.lineTo(X(ref.total), altY(P.a[n - 1] * FEET_PER_METER)); ctx.lineTo(X(ref.total), B); ctx.closePath();
+    ctx.beginPath(); ctx.moveTo(L, B);
+    visibleLine(ref.d, ref.prof.a, meters => altY(meters * FEET_PER_METER));
+    ctx.lineTo(R, B); ctx.closePath();
     ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
     ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
   }
-
   if (reference) {
-    const { distance, power } = reference;
-    const step = Math.max(1, Math.floor(power.length / (2 * (R - L))));
     ctx.strokeStyle = C.ghost; ctx.lineWidth = 1.5; ctx.beginPath();
-    ctx.moveTo(X(distance[0]), wattsY(power[0]));
-    for (let i = step; i < power.length; i += step) ctx.lineTo(X(distance[i]), wattsY(power[i]));
-    ctx.lineTo(X(ref.total), wattsY(power[power.length - 1])); ctx.stroke();
+    visibleLine(reference.distance, reference.power, wattsY);
+    ctx.stroke();
   }
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath();
   let connected = false, latest = null;
@@ -370,10 +382,27 @@ export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, refer
   if (latest) dot(ctx, X(latest[0]), wattsY(latest[1]), 2, '#fff');
   ctx.restore();
 
-  ctx.fillStyle = '#C9D1DC'; ctx.font = '10px system-ui';
-  ctx.textAlign = 'left'; ctx.fillText('0 km', L, ctx.h - 2);
-  ctx.textAlign = 'right'; ctx.fillText(`${(ref.total / 1000).toFixed(1)} km`, R, ctx.h - 2);
+  const distanceDigits = span >= 4000 ? 1 : span >= 400 ? 2 : 3;
+  const labelWidth = (R - L) / 4 - 3;
+  ctx.strokeStyle = '#818995'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(L, B); ctx.lineTo(R, B);
+  ctx.font = '9px system-ui'; ctx.textAlign = 'left'; ctx.fillStyle = '#E4E8EF';
+  ctx.fillText('km', 1, B + 13);
+  const firstTime = fmtTime(ref.elapsedAt(start));
+  const timeUnitRoom = L - Math.min(labelWidth, ctx.measureText(firstTime).width) / 2 - 3;
+  ctx.fillStyle = '#B7C2D0'; ctx.fillText(timeUnitRoom >= 26 ? 'Elapsed' : 'Time', 1, B + 24, timeUnitRoom);
+  ctx.textAlign = 'center';
+  for (let i = 0; i < 5; i++) {
+    const d = start + span * i / 4, x = X(d);
+    ctx.moveTo(x, B); ctx.lineTo(x, B + 4);
+    if (labelWidth > 0) {
+      ctx.fillStyle = '#E4E8EF'; ctx.fillText((d / 1000).toFixed(distanceDigits), x, B + 13, labelWidth);
+      ctx.fillStyle = '#B7C2D0'; ctx.fillText(fmtTime(ref.elapsedAt(d)), x, B + 24, labelWidth);
+    }
+  }
+  ctx.stroke();
   function riderPosition(d, radius, color) {
+    if (d < start || d > end) return;
     const y = Math.max(T, Math.min(B, altY(ref.at('a', d) * FEET_PER_METER)));
     dot(ctx, X(d), y, radius, color);
   }

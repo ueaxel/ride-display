@@ -25,7 +25,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '53 · 261127 (video chart scales and power averaging)';
+export const APP_VERSION = '54 · 261127 (video profile distance zoom and elapsed ticks)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -1210,7 +1210,7 @@ const RESET_KEYS = ['AudioVolumeUp', 'VolumeUp', 'Enter', ' ', 'PageDown', 'Arro
 const BRAKE_KEYS = ['AudioVolumeDown', 'VolumeDown', 'PageUp', 'ArrowLeft', 'ArrowUp', 'MediaTrackPrevious', 'b', 'B'];
 window.addEventListener('keydown', e => {
   if ($('dlgSettings').open) { $('keyTest').textContent = `Got "${e.key}"` + (RESET_KEYS.includes(e.key) ? ' — this button resets the gap.' : BRAKE_KEYS.includes(e.key) ? ' — this button brakes (trainer / video screen).' : ' — not used.'); e.preventDefault(); return; }
-  if (e.target.closest('input, select, textarea, #vPlayback button, #vProfileControls button') || document.querySelector('dialog[open]')) return;
+  if (e.target.closest('input, select, textarea, #vProfileControls button') || document.querySelector('dialog[open]')) return;
   if (RESET_KEYS.includes(e.key) && (mode === 'ghost' || e.key !== ' ')) { e.preventDefault(); resync(); banner('Gap reset'); setTimeout(() => banner(''), 2000); }
   else if (BRAKE_KEYS.includes(e.key) && indoorMode()) { e.preventDefault(); toggleBrake(); }
 });

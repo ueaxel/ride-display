@@ -189,14 +189,38 @@ export function initVideoScreen(api) {
   $('vBack15').onclick = () => skip(-15, true, api.posNow());
   $('vForward15').onclick = () => skip(15, true, api.posNow());
 
-  let scrubPointer = null;
-  function scrub(event) {
+  const MIN_DISTANCE_VIEW = 50;
+  let scrubPointer = null, distanceZoom = null, distanceFrame = 0;
+  function visibleDistance(ref) {
+    return distanceZoom?.ref === ref ? distanceZoom.range : [0, ref?.total ?? 0];
+  }
+  function profileFraction(clientX) {
     const { left, width, height } = profile.getBoundingClientRect();
     const { L, R } = D.videoProfileBox(Math.round(width), Math.round(height));
-    if (R <= L) return;
-    const ratio = clamp((event.clientX - left - L) / (R - L), 1);
-    seekRoute(ratio * api.ref.total, moveMe.checked);
+    return R > L ? clamp((clientX - left - L) / (R - L), 1) : 0;
   }
+  function scrub(event) {
+    const [start, end] = visibleDistance(api.ref);
+    seekRoute(start + (end - start) * profileFraction(event.clientX), moveMe.checked);
+  }
+  profile.addEventListener('wheel', event => {
+    const ref = api.ref;
+    if (!ref?.total || syncing || event.ctrlKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? profile.clientHeight : 1;
+    const [start, end] = visibleDistance(ref), span = end - start;
+    const ratio = profileFraction(event.clientX);
+    const nextSpan = Math.min(ref.total, Math.max(MIN_DISTANCE_VIEW, span * Math.exp(event.deltaY * unit / 300)));
+    if (nextSpan === span) return;
+    const nextStart = clamp(start + (span - nextSpan) * ratio, ref.total - nextSpan);
+    distanceZoom = nextSpan === ref.total ? null : { ref, range: [nextStart, nextStart + nextSpan] };
+    wake();
+    if (!distanceFrame) distanceFrame = requestAnimationFrame(() => {
+      distanceFrame = 0;
+      if (document.body.dataset.mode === 'video' && layout.elev.on && !syncing && chartScales) drawProfile();
+    });
+  }, { passive: false });
   profile.addEventListener('pointerdown', event => {
     if (scrubPointer != null || event.button !== 0 || !api.ref?.total || syncing) return;
     scrubPointer = event.pointerId;
@@ -696,8 +720,14 @@ export function initVideoScreen(api) {
     const p = pendingSeek ? api.pos : api.posNow();
     // past the end (or before the start) of this chapter: switch to the chapter that has it
     if (c.chapters && c.chapters.length > 1 && !c.covers(p)) {
-      const next = c.chapters.find(m => m !== c && m.covers(p));
-      if (next) {
+      let next = c.chapters.find(m => m.covers(p));
+      if (!next && pendingSeek) {
+        // An explicit seek can land on route points beyond both video endpoints.
+        const first = c.chapters[0], last = c.chapters[c.chapters.length - 1];
+        if (p < first.videoRange[0]) next = first;
+        else if (p > last.videoRange[1]) next = last;
+      }
+      if (next && next !== c) {
         const lookYaw = view.yaw;
         cur = clips.indexOf(next); view.load(next.url); view.yaw = lookYaw; applyClipView(next);
         return;
@@ -732,6 +762,16 @@ export function initVideoScreen(api) {
   // ---------------------------------------------------------------- drawing
   let lastState = null;
   function render(state) { lastState = state; draw(); }
+  function drawProfile() {
+    const ref = api.ref, { you, ghost } = lastState, data = referenceData(ref);
+    const { elevation, power: [, watts] } = chartScales;
+    const rider = (traces.get(ref) || []).map(point => point && [point[0], riderAverage.power[point[1]]]);
+    chartBox = D.drawElevationPlain(profile, ref, {
+      you, ghost, team: api.teamAt(), rider, reference: data?.power.length ? data : null, elevation, watts,
+      distanceRange: visibleDistance(ref), fmtTime: api.fmtTime,
+    });
+    placeScaleHandles();
+  }
   function draw() {
     if (document.body.dataset.mode !== 'video' || !lastState) return;
     const { t, you, ghost, gapM, gapS, hr } = lastState;
@@ -771,11 +811,13 @@ export function initVideoScreen(api) {
       else { g.textContent = '–'; g.className = 'v'; set('vGapS', ''); }
     }
     const ref = api.ref, canSeek = !!ref?.total;
+    if (distanceZoom?.ref !== ref) distanceZoom = null;
     for (const button of ['vBack15', 'vForward15', 'vPlay', 'vMoveMe']) $(button).disabled = !canSeek;
     profile.setAttribute('aria-disabled', String(!canSeek));
     profile.setAttribute('aria-valuemax', String(Math.round(ref?.total || 0)));
     profile.setAttribute('aria-valuenow', String(Math.round(ghost ?? 0)));
-    profile.setAttribute('aria-valuetext', `${((ghost ?? 0) / 1000).toFixed(2)} km`);
+    profile.setAttribute('aria-valuetext', canSeek
+      ? `${((ghost ?? 0) / 1000).toFixed(2)} km, ${api.fmtTime(ref.elapsedAt(ghost ?? 0))} elapsed` : 'No ride loaded');
     if (layout.elev.on || layout.scatter.on || layout.trace.on) {
       const data = referenceData(ref);
       if (riderAverage.seconds !== averageSeconds || riderAverage.power.length !== riderPower.length) riderAverage = averageData(riderPower);
@@ -785,13 +827,7 @@ export function initVideoScreen(api) {
       if (elevationZoom?.ref !== ref) elevationZoom = null;
       const elevation = elevationZoom?.range ?? data?.elevation;
       chartScales = { elevation, power: [0, watts] };
-      if (layout.elev.on) {
-        const rider = (traces.get(ref) || []).map(point => point && [point[0], riderAverage.power[point[1]]]);
-        chartBox = D.drawElevationPlain(profile, ref, {
-          you, ghost, team: api.teamAt(), rider, reference: data?.power.length ? data : null, elevation, watts,
-        });
-        placeScaleHandles();
-      }
+      if (layout.elev.on) drawProfile();
       if (layout.scatter.on) D.drawScatter($('vScatter'), riderAverage.power, riderHr, riderPower.length - 1,
         { avg: averageSeconds, comparison: { ghost: data ? { power: data.power, hr: data.hr, now } : null, maxWatts: watts } });
       if (layout.trace.on) D.drawTrace($('vTrace'), videoTrace(data, now), { window: TRACE_SECONDS, maxWatts: watts });

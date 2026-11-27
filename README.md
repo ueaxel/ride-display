@@ -65,6 +65,7 @@ When you load a reference, the page also downloads the streets within about 500 
 - **World Lock:** export with GoPro Player's *World Lock* **off**. World Lock keeps the picture facing the direction the camera had at the start, so on a bike ride the view drifts away from the road. *Horizon Leveling* can stay on. For a video already exported with World Lock on, press **Turn with road**. The app then turns the view by how much the route has turned since the start of the video. This is saved per clip.
 - **Panels:** drag a title to move its panel and use the bottom-right corner to resize it. **Panels** shows, hides, or resets the overlays. The **Opacity** slider beside **Elevation & Power** adjusts all panel backgrounds and remembers your setting.
 - **Elevation & Power:** the left axis is elevation in feet and the right axis is power in watts. The reference power curve is purple and your measured power is white. Drag either elevation dot (**100** or **1,000 ft**) or the **100 W** dot vertically to zoom its axis. An arrow shows when a marked value is outside the visible range. Double-click a dot or focus it and press **Home** to restore automatic scaling.
+- **Distance zoom:** hover over the profile and scroll up on the trackpad or mouse wheel to zoom around the pointer. Scroll down to widen the view. The five ticks show distance in kilometres and elapsed time since the reference ride started, including stops. Dragging the profile still seeks within the visible range.
 - **Power avg:** choose a rolling average from 1 to 60 seconds beneath the profile. It applies to the power curves and both comparison plots. All three plots share the same watt range. Automatic scaling leaves isolated spikes outside the visible range, and zooming out lets you inspect them.
 - **Heart rate vs power:** purple dots follow the ghost and white dots follow you. Each dot pairs heart rate with the selected power average, and older dots fade. Your dots appear when both sensor readings are available. Open **Panels** to enable the plot on a phone.
 - **Power & Heart Rate:** enable this time plot in **Panels**. The ghost uses light purple for watts and darker purple for heart rate. Your lines use light grey for watts and darker grey for heart rate.
@@ -154,7 +155,7 @@ On the video screen, drag or tap the **Elevation & Power** profile to jump to th
 
 ## Play the original ride
 
-**▶** in the video screen's top-left controls or beside the trainer screen slider plays the original ride from the ghost's position. The video, map, elevation marker, and original rider's numbers follow the replay. Playback uses moving time and leaves the trainer idle. **⏸** pauses. **Start** begins your own ride from that spot.
+**▶** between the skip buttons in **Elevation & Power**, or beside the trainer screen slider, plays the original ride from the ghost's position. The video, map, elevation marker, and original rider's numbers follow the replay. Playback uses moving time and leaves the trainer idle. **⏸** pauses. **Start** begins your own ride from that spot.
 
 ## Ride library (Mac) and phone-size rides
 
