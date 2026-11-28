@@ -25,7 +25,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '54 · 261127 (video profile distance zoom and elapsed ticks)';
+export const APP_VERSION = '55 · 261127_2025 (profile: ghost time/distance, power avg in plot)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));

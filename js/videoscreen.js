@@ -770,6 +770,10 @@ export function initVideoScreen(api) {
       you, ghost, team: api.teamAt(), rider, reference: data?.power.length ? data : null, elevation, watts,
       distanceRange: visibleDistance(ref), fmtTime: api.fmtTime,
     });
+    // where the ghost is on the original ride: its elapsed time and distance from the start
+    const onRoute = ref?.total && ghost != null ? Math.max(0, Math.min(ghost, ref.total)) : null;
+    $('vGhostTime').textContent = onRoute != null ? api.fmtTime(ref.elapsedAt(onRoute)) : '–';
+    $('vGhostDist').textContent = onRoute != null ? `${(onRoute / 1000).toFixed(2)} km` : '–';
     placeScaleHandles();
   }
   function draw() {

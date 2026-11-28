@@ -159,8 +159,14 @@
   .vaxis[data-edge=above] span::after { content:' ↑'; }
   .vaxis[data-edge=below] span::after { content:' ↓'; }
   .vaxis:focus-visible { outline:1px solid currentColor; }
-  .vavg { display:flex; flex:none; align-items:center; gap:4px; align-self:flex-end; padding-right:10px;
+  .vplotinfo { position:absolute; z-index:2; left:calc(var(--v-axis-width, 40px) + 4px); top:16px;
+    display:flex; flex-direction:column; gap:1px; padding:2px 5px; border-radius:5px;
+    background:rgba(11,15,20,.55); pointer-events:none; }
+  .vavg { display:flex; flex:none; align-items:center; gap:4px; pointer-events:auto;
     color:#d9dfe9; font-size:10px; white-space:nowrap; }
+  .vghostinfo { display:flex; justify-content:space-between; gap:6px; color:var(--ghost); font-size:10px; white-space:nowrap; text-shadow:0 1px 2px #000; }
+  .vghostinfo span { color:#d9dfe9; }
+  .vghostinfo b { font-weight:600; font-variant-numeric:tabular-nums; }
   #vPowerAvg { width:64px; min-width:0; }
   #vPowerAvgValue { min-width:2.5em; text-align:right; font-variant-numeric:tabular-nums; }
   @container (max-width: 265px) {
@@ -399,9 +405,13 @@
         aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-disabled="true" title="Drag to seek. Scroll up or down to zoom the distance axis."></canvas>
         <button class="vaxis" data-axis="elevation" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 100 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>100</span></button>
         <button class="vaxis" data-axis="elevation" data-mark="1000" role="slider" aria-orientation="vertical" aria-label="Elevation scale at 1,000 feet" title="Drag up or down to change the elevation scale. Double-click to reset." hidden><span>1,000</span></button>
+        <div class="vplotinfo">
+          <label class="vavg" for="vPowerAvg">Power avg <input type="range" id="vPowerAvg" min="1" max="60" value="10" aria-label="Power averaging time in seconds"> <output id="vPowerAvgValue" for="vPowerAvg">10 s</output></label>
+          <div class="vghostinfo" aria-live="off"><span>Ghost ride time</span> <b id="vGhostTime">–</b></div>
+          <div class="vghostinfo"><span>Ghost from start</span> <b id="vGhostDist">–</b></div>
+        </div>
         <button class="vaxis" data-axis="power" data-mark="100" role="slider" aria-orientation="vertical" aria-label="Power scale at 100 watts" title="Drag up or down to change the power scale in both plots. Double-click to reset." hidden><span>100</span></button>
       </div>
-      <label class="vavg" for="vPowerAvg">Power avg <input type="range" id="vPowerAvg" min="1" max="60" value="10" aria-label="Power averaging time in seconds"> <output id="vPowerAvgValue" for="vPowerAvg">10 s</output></label>
     </div><div class="grip"></div>
   </section>
   <section class="float" data-panel="map"><div class="fhead">Map<button id="mapWhole">Whole route</button><button class="fclose" title="Hide">×</button></div>

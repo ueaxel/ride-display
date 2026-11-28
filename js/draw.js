@@ -361,13 +361,14 @@ export function drawElevationPlain(canvas, ref, { you, ghost, team, rider, refer
     ctx.beginPath(); ctx.moveTo(L, B);
     visibleLine(ref.d, ref.prof.a, meters => altY(meters * FEET_PER_METER));
     ctx.lineTo(R, B); ctx.closePath();
-    ctx.fillStyle = 'rgba(200,205,215,0.28)'; ctx.fill();
-    ctx.strokeStyle = 'rgba(220,225,235,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = 'rgba(200,205,215,0.5)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(235,240,248,0.95)'; ctx.lineWidth = 1.8; ctx.stroke();
   }
   if (reference) {
+    ctx.save(); ctx.globalAlpha = 0.45;                 // the ghost's power sits behind the elevation
     ctx.strokeStyle = C.ghost; ctx.lineWidth = 1.5; ctx.beginPath();
     visibleLine(reference.distance, reference.power, wattsY);
-    ctx.stroke();
+    ctx.stroke(); ctx.restore();
   }
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath();
   let connected = false, latest = null;
