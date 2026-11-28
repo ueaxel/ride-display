@@ -73,6 +73,12 @@ const semicircles = deg => deg == null ? null : Math.round(deg * 2 ** 31 / 180);
 export function buildFit(S, { indoor = true } = {}) {
   const n = S.wall.length;
   if (!n) throw new Error('Nothing recorded yet.');
+  // Indoor ride on a reference route: write the route's position and elevation at your
+  // route distance (a "virtual ride", as Zwift does), so it overlays the original ride.
+  const virtual = indoor && !!S.routeLat?.some(v => v != null);
+  const lat = i => S.lat[i] ?? (virtual ? S.routeLat[i] : null);
+  const lon = i => S.lon[i] ?? (virtual ? S.routeLon[i] : null);
+  const alt = i => S.alt?.[i] ?? (virtual ? S.routeAlt?.[i] : null);
   const w = new Writer();
   const t0 = fitTime(S.wall[0]) - 1, tEnd = fitTime(S.wall[n - 1]);
   // file_id
@@ -91,8 +97,8 @@ export function buildFit(S, { indoor = true } = {}) {
       w.data(1, { 253: ts - 1, 0: 0, 1: 0 });
     }
     w.data(2, {
-      253: ts, 0: semicircles(S.lat[i]), 1: semicircles(S.lon[i]),
-      2: S.alt && S.alt[i] != null ? (S.alt[i] + 500) * 5 : null,
+      253: ts, 0: semicircles(lat(i)), 1: semicircles(lon(i)),
+      2: alt(i) != null ? (alt(i) + 500) * 5 : null,
       3: S.hr[i] > 0 ? S.hr[i] : null, 4: S.cad[i], 5: S.dist[i] * 100, 6: S.speed[i] * 1000,
       7: S.power[i],
     });
@@ -109,7 +115,7 @@ export function buildFit(S, { indoor = true } = {}) {
     avgHr: avg(S.hr), maxHr: max(S.hr), avgP: indoor || vals(pw).length ? pw.reduce((a, b) => a + b, 0) / n : null,
     maxP: max(pw), avgCad: avg(S.cad), maxCad: max(S.cad), avgSpd: (S.dist[n - 1] || 0) / n * 1000, maxSpd: max(S.speed) * 1000,
   };
-  const sport = 2, sub = indoor ? 6 : 7;          // cycling; indoor_cycling / road
+  const sport = 2, sub = virtual ? 58 : indoor ? 6 : 7;   // cycling; virtual_activity / indoor_cycling / road
   // lap
   w.define(3, 19, [[253, 'u32'], [254, 'u16'], [0, 'enum'], [1, 'enum'], [2, 'u32'], [7, 'u32'], [8, 'u32'], [9, 'u32'],
     [13, 'u16'], [14, 'u16'], [15, 'u8'], [16, 'u8'], [17, 'u8'], [18, 'u8'], [19, 'u16'], [20, 'u16'], [25, 'enum'], [39, 'enum']]);

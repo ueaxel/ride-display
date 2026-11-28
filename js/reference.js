@@ -501,6 +501,13 @@ export class Reference {
   }
   index(dist) { return Math.max(0, Math.min(this.n - 1, Math.floor(dist / this.prof.step))); }
   xy(dist) { return [this.at('x', dist), this.at('y', dist)]; }
+  // [lat, lon] in degrees of the route at `dist` (from the smoothed x/y track)
+  latLon(dist) {
+    const p = this.prof;
+    if (!p.x || p.lat0 == null) return null;
+    const [x, y] = this.xy(dist);
+    return [p.lat0 + y / M_PER_DEG_LAT, p.lon0 + x / (Math.cos(p.lat0 * Math.PI / 180) * M_PER_DEG_LON)];
+  }
   toJSON() { return this.prof; }
 }
 

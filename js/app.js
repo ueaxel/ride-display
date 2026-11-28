@@ -25,7 +25,7 @@ const store = {
 
 // ------------------------------------------------------------------ state
 
-export const APP_VERSION = '55 · 261127_2025 (profile: ghost time/distance, power avg in plot)';
+export const APP_VERSION = '56 · 261127_2050 (indoor .fit follows the route: virtual ride)';
 const MODES = ['trainer', 'ghost', 'video'];
 let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1)
   : (store.get('mode') || (Math.min(screen.width, screen.height) >= 700 ? 'trainer' : 'ghost'));
@@ -59,7 +59,8 @@ let mapView = 'all', avgWin = 10, traceWin = 600, ghostSpan = 250, lastFix = nul
 function newRide() {
   if (S && S.wall.length) { saveRide(S, mode, { open: false }); stopTrainer(); }     // the ride you had is kept, closed
   S = { power: [], hr: [], cad: [], speed: [], dist: [], refDist: [], gapM: [], gapS: [], refPower: [], refHr: [],
-    lat: [], lon: [], alt: [], wall: [], pEst: [], work: [], spo2: [], oxPr: [] };
+    lat: [], lon: [], alt: [], wall: [], pEst: [], work: [], spo2: [], oxPr: [],
+    routeLat: [], routeLon: [], routeAlt: [], routeD: [] };   // indoors: where you are on the reference route
   trail = []; refTrail = []; stopEp = null; wasMoving = false;
   outPower = new OutdoorPower(rider);
   running = false; clock = new MovingClock(); indoor = new IndoorRide(rider);
@@ -214,9 +215,15 @@ function tick() {
   S.pEst.push(Math.round(pNow)); S.work.push((last(S.work) ?? 0) + pNow);
   S.cad.push(indoorMode() || links.cad ? cadence : null); S.hr.push(hr); S.speed.push(speed); S.dist.push(odo); S.wall.push(now);
   const oxFresh = oxOn() && now - live.tOx < 5000;
-  for (const k of ['spo2', 'oxPr']) if (!S[k]) S[k] = S.wall.slice(0, -1).map(() => null);   // ride saved by an older version
+  for (const k of ['spo2', 'oxPr', 'routeLat', 'routeLon', 'routeAlt', 'routeD']) if (!S[k]) S[k] = S.wall.slice(0, -1).map(() => null);   // ride saved by an older version
   S.spo2.push(oxFresh ? live.spo2 : null); S.oxPr.push(oxFresh ? live.oxPr : null);
   S.lat.push(fix ? fix.lat : null); S.lon.push(fix ? fix.lon : null); S.alt.push(fix && fix.alt != null ? fix.alt : null);
+  // Indoors on a reference route: the route's GPS point at your route distance, so the
+  // saved .fit lies on the same road as the original ride (compare spot by spot).
+  const onRoute = indoorMode() && ref?.hasRoute ? Math.min(dist, ref.total) : null;
+  const routePoint = onRoute != null ? ref.latLon(onRoute) : null;
+  S.routeLat.push(routePoint ? routePoint[0] : null); S.routeLon.push(routePoint ? routePoint[1] : null);
+  S.routeAlt.push(onRoute != null && ref.hasAlt ? ref.at('a', onRoute) : null); S.routeD.push(onRoute);
   if (fix) { trail.push(area.xy(fix.lat, fix.lon)); if (matcher) refTrail.push(matcher.toXY(fix.lat, fix.lon)); }
   if (S.wall.length % 10 === 0) saveRide(S, mode, rideState());   // kept on the phone as you ride
   const t = clock.seconds;
